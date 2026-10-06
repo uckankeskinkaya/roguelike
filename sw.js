@@ -1,6 +1,6 @@
 // Service worker: precaches the app shell so the game opens offline.
 // Bump VERSION on every deploy so clients pick up the new files.
-const VERSION = 'neonkuyu-v1';
+const VERSION = 'neonkuyu-v2';
 const SHELL = [
   './',
   'index.html',

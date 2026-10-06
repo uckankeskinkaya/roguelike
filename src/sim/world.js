@@ -10,7 +10,7 @@ import { SKILLS, computeStats } from './skills.js';
 import { ENEMIES, AI, clampToArena, BURN_TICKS } from './enemies.js';
 import { stepMovement, dashCooldownTicks } from './player.js';
 import {
-  isBossWave, waveDuration, spawnRate, hpScale, dmgScale, eliteChance, xpForLevel, poolFor,
+  isBossWave, waveQuota, spawnRate, hpScale, dmgScale, eliteChance, xpForLevel, poolFor,
 } from './waves.js';
 
 const TAU = Math.PI * 2;
@@ -602,7 +602,7 @@ export class Sim {
       r: def.r * (elite ? 1.3 : 1),
       hp: hp * (elite ? 3 : 1), maxHp: hp * (elite ? 3 : 1),
       dmg: def.dmg * dmgScale(Math.max(1, this.wave)) * (elite ? 1.4 : 1),
-      speed: def.speed * (1 + 0.012 * this.wave) * (elite ? 0.9 : 1),
+      speed: def.speed * 0.88 * (1 + 0.008 * this.wave) * (elite ? 0.9 : 1),
       mass: (def.mass || 1) * (elite ? 2 : 1),
       elite: !!elite, boss: !!def.boss,
       ang: 0, flash: 0, state: 0, st: 0,
@@ -871,25 +871,30 @@ export class Sim {
       const base = Math.max(1, this.levelsThisWave);
       this.levelsThisWave = 0;
       this.assignPending = false;
-      this.pickTimer = PICK_TIMEOUT;
+      this.pickTimer = this.pickTimeout();
       for (const p of this.players) {
         p.picks = base + (p.catchUp || 0);
         p.catchUp = 0;
         p.choices = this.genChoices(p);
+        if (!p.choices.length) p.picks = 0; // everything maxed out
         p.buildVer++;
       }
       return;
     }
     const waiting = this.players.filter((p) => p.connected && p.picks > 0);
     if (--this.pickTimer <= 0) {
-      for (const p of waiting) while (p.picks > 0) this.choose(p.pid, 0);
+      for (const p of waiting) while (p.picks > 0 && this.choose(p.pid, 0));
+      for (const p of waiting) p.picks = 0;
     }
     if (waiting.length === 0 || this.pickTimer <= 0) {
       this.phase = 'countdown';
-      this.countdown = Math.round(2.2 * TICK_RATE);
+      this.countdown = Math.round(1.4 * TICK_RATE);
       this.emit('countdown', this.wave + 1);
     }
   }
+
+  // solo: take all the time you want; co-op: auto-pick so nobody stalls the team
+  pickTimeout() { return this.connectedCount() > 1 ? PICK_TIMEOUT : 1e9; }
 
   startWave() {
     this.wave++;
@@ -898,8 +903,10 @@ export class Sim {
     this.spawnAcc = 0;
     this.hordeDone = false;
     const boss = isBossWave(this.wave);
-    this.waveTicks = boss ? 0 : waveDuration(this.wave);
-    this.waveLen = this.waveTicks;
+    // waveLen = enemy quota, waveTicks = enemies still to spawn or kill (0 on boss waves)
+    this.waveLen = boss ? 0 : Math.round(waveQuota(this.wave) * (1 + 0.5 * (this.connectedCount() - 1)));
+    this.waveSpawned = 0;
+    this.waveTicks = this.waveLen;
     for (const p of this.players) {
       if (p.downed) this.revive(p, 1);
       p.hp = p.st.maxHp;
@@ -911,7 +918,7 @@ export class Sim {
       this.addTelegraph(c.x, c.y, 'gozcu', false, 110);
     } else {
       // opening pack so the arena is never empty
-      const n = 3 + Math.floor(this.wave / 2);
+      const n = 2 + Math.floor(this.wave / 4);
       for (let i = 0; i < n; i++) this.spawnFromPool();
     }
   }
@@ -936,33 +943,37 @@ export class Sim {
     for (let i = 0; i < n; i++) {
       this.addTelegraph(pt.x + (n > 1 ? this.rng.range(-55, 55) : 0), pt.y + (n > 1 ? this.rng.range(-55, 55) : 0), c.type, elite);
     }
+    this.waveSpawned += n;
   }
 
   stepWave() {
     const boss = isBossWave(this.wave);
-    const cap = 120 + 25 * (this.connectedCount() - 1);
-    if (this.enemies.length + this.teles.length < cap) {
-      const ramp = boss ? 1 : 0.6 + 0.8 * (1 - this.waveTicks / this.waveLen);
+    const quotaLeft = boss || this.waveSpawned < this.waveLen;
+    const cap = 100 + 25 * (this.connectedCount() - 1);
+    if (quotaLeft && this.enemies.length + this.teles.length < cap) {
+      const progress = boss ? 1 : this.waveSpawned / this.waveLen;
+      const ramp = boss ? 1 : 0.7 + 0.6 * progress;
       this.spawnAcc += spawnRate(this.wave, boss) * ramp * (1 + 0.6 * (this.connectedCount() - 1)) * DT;
       while (this.spawnAcc >= 1) { this.spawnAcc--; this.spawnFromPool(); }
     }
-    if (!boss) {
-      // mid-wave horde: a ring of enemies closes in around a random player
-      if (!this.hordeDone && this.wave >= 3 && this.waveTicks < this.waveLen * 0.45) {
-        this.hordeDone = true;
-        const t = this.nearestPlayer(this.rng.range(0, ARENA_W), this.rng.range(0, ARENA_H));
-        if (t) {
-          const n = 10 + this.wave;
-          const type = this.wave >= 7 && this.rng.chance(0.5) ? 'yavru' : 'sinek';
-          for (let i = 0; i < n; i++) {
-            const a = (i / n) * TAU;
-            this.addTelegraph(t.x + Math.cos(a) * 330, t.y + Math.sin(a) * 330, type, false, 70);
-          }
-          this.emit('horde');
+    if (boss) return;
+    this.waveTicks = Math.max(0, this.waveLen - this.waveSpawned) + this.enemies.length + this.teles.length;
+    // mid-wave horde: a ring of enemies closes in around a random player
+    if (!this.hordeDone && this.wave >= 4 && this.waveSpawned >= this.waveLen * 0.55) {
+      this.hordeDone = true;
+      const t = this.nearestPlayer(this.rng.range(0, ARENA_W), this.rng.range(0, ARENA_H));
+      if (t) {
+        const n = Math.min(26, 8 + Math.floor(this.wave * 0.6));
+        const type = this.wave >= 12 && this.rng.chance(0.5) ? 'yavru' : 'sinek';
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * TAU;
+          this.addTelegraph(t.x + Math.cos(a) * 330, t.y + Math.sin(a) * 330, type, false, 70);
         }
+        this.waveSpawned += n;
+        this.emit('horde');
       }
-      if (--this.waveTicks <= 0) this.endWave();
     }
+    if (this.waveSpawned >= this.waveLen && this.enemies.length === 0 && this.teles.length === 0) this.endWave();
   }
 
   onBossKilled(e) {
@@ -988,7 +999,7 @@ export class Sim {
     this.teles = [];
     for (const b of this.bullets) if (b.kind !== 'boomerang') b.dead = true;
     this.phase = 'pick';
-    this.pickTimer = PICK_TIMEOUT;
+    this.pickTimer = this.pickTimeout();
     for (const p of this.players) {
       if (p.downed) this.revive(p, 1);
     }

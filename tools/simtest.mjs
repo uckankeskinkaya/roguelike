@@ -13,7 +13,7 @@ for (const p of sim.players) p.iframes = 1e9;
 const inputs = new Map();
 let maxEnemies = 0, maxEB = 0, maxB = 0, evCount = 0;
 const t0 = Date.now();
-for (let t = 0; t < 60 * 60 * 25 && sim.phase !== 'victory' && sim.phase !== 'gameover'; t++) {
+for (let t = 0; t < 60 * 60 * 60 && sim.phase !== 'victory' && sim.phase !== 'gameover'; t++) {
   for (const p of sim.players) {
     p.iframes = 1e9;
     const a = t * 0.01 + p.pid;

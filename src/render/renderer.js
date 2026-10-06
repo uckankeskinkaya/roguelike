@@ -22,6 +22,8 @@ export class Renderer {
     this.cam = { x: ARENA_W / 2, y: ARENA_H / 2, zoom: 1 };
     this.shakeX = 0; this.shakeY = 0; this.shakeR = 0;
     this.time = 0;
+    this.frameDt = 1 / 60;
+    this.aimSmooth = new Map();
     this.decal = document.createElement('canvas');
     this.decal.width = ARENA_W / 2; this.decal.height = ARENA_H / 2;
     this.dctx = this.decal.getContext('2d');
@@ -94,6 +96,7 @@ export class Renderer {
   render(view, alpha, localPid, dt, opts = {}) {
     const { ctx, fx } = this;
     this.time += dt;
+    this.frameDt = dt;
     fx.update(dt);
     this.stampDecals();
 
@@ -105,15 +108,17 @@ export class Renderer {
       let tx = ARENA_W / 2, ty = ARENA_H / 2;
       if (me) {
         const p = opts.localPos || ipos(me);
-        const ax = opts.localAim ? opts.localAim.x : me.aimX;
-        const ay = opts.localAim ? opts.localAim.y : me.aimY;
-        tx = p.x + ax * 55; ty = p.y + ay * 55;
+        // look-ahead only with a mouse: with auto-aim the target flips between
+        // enemies and a camera that follows it jitters on small screens
+        const lead = opts.localAim ? 55 : 0;
+        tx = p.x + (opts.localAim ? opts.localAim.x * lead : 0);
+        ty = p.y + (opts.localAim ? opts.localAim.y * lead : 0);
       } else if (view.players.length) {
         tx = 0; ty = 0;
         for (const p of view.players) { tx += p.x; ty += p.y; }
         tx /= view.players.length; ty /= view.players.length;
       }
-      const k = 1 - Math.exp(-dt * 9);
+      const k = 1 - Math.exp(-dt * (opts.localAim ? 9 : 6));
       this.cam.x += (tx - this.cam.x) * k;
       this.cam.y += (ty - this.cam.y) * k;
       const z = this.cam.zoom;
@@ -558,8 +563,21 @@ export class Renderer {
     const col = PLAYER_COLORS[p.pid % PLAYER_COLORS.length];
     const r = p.r || 14;
     const t = this.time;
-    const ax = localAim ? localAim.x : p.aimX, ay = localAim ? localAim.y : p.aimY;
-    const aim = Math.atan2(ay, ax);
+    let aim;
+    if (localAim) aim = Math.atan2(localAim.y, localAim.x);
+    else {
+      // auto-aim snaps between targets: ease the drawn gun/visor so it doesn't twitch
+      const target = Math.atan2(p.aimY, p.aimX);
+      let cur = this.aimSmooth.get(p.pid);
+      if (cur === undefined) cur = target;
+      let d = target - cur;
+      while (d > Math.PI) d -= TAU;
+      while (d < -Math.PI) d += TAU;
+      cur += d * Math.min(1, this.frameDt * 14);
+      this.aimSmooth.set(p.pid, cur);
+      aim = cur;
+    }
+    const ax = Math.cos(aim), ay = Math.sin(aim);
     if (!p.connected) ctx.globalAlpha = 0.3;
     // dash afterimages
     if (p.dashT > 0 && Math.random() < 0.9) this.fx.particles.add(P.GHOST, pos.x, pos.y, 0, 0, 0.18, r, col);

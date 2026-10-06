@@ -97,7 +97,8 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
 
 ## Oyun
 
-- **Döngü:** 15 dalga. Her dalga sonunda güçlendirme kartı seçersin. 5, 10 ve 15. dalgalar
+- **Döngü:** 30 dalga, süre yok: bir dalga, tüm düşmanları temizlenince biter (zorluk yavaş ve
+  geç yükselir). Her dalga sonunda güçlendirme kartı seçersin. Her 5. dalga
   **Kor Gözcü** boss'u (spiral, halka, hücum, nişanlı yelpaze ve çağırma desenleri; %50 canın
   altında öfkeli ikinci evre). Ölüm = baştan. Her koşu bir **tohuma** bağlı. Aynı tohum aynı
   silah tekliflerini ve düşman dizilimini üretir (tek oyunculu).

@@ -1,41 +1,43 @@
 // Wave director data. Pure data + small helpers; the Sim drives it.
-import { TICK_RATE, BOSS_WAVES, FINAL_WAVE } from '../config.js';
+import { BOSS_WAVES, FINAL_WAVE } from '../config.js';
 
 // type -> [first wave, weight, group size]
 export const SPAWN_TABLE = {
   surungen: [1, 10, 1],
-  sinek:    [2, 5, 5],
-  tukurgen: [2, 4, 1],
-  kaya:     [3, 2.5, 1],
-  bombaci:  [4, 3, 1],
-  ok:       [6, 3.5, 1],
-  bolunen:  [7, 3, 1],
-  firildak: [8, 2.5, 1],
+  sinek:    [3, 5, 5],
+  tukurgen: [4, 4, 1],
+  kaya:     [6, 2.5, 1],
+  bombaci:  [8, 3, 1],
+  ok:       [11, 3.5, 1],
+  bolunen:  [13, 3, 1],
+  firildak: [16, 2.5, 1],
 };
 
 export function isBossWave(w) { return BOSS_WAVES.includes(w); }
 export function isFinalWave(w) { return w >= FINAL_WAVE; }
 
-export function waveDuration(w) {
-  return Math.round(Math.min(18 + w * 3, 55) * TICK_RATE);
+// Waves have no timer: each one is a quota of enemies. It ends when the
+// whole quota has spawned and been killed.
+export function waveQuota(w) {
+  return Math.round(14 + 4.2 * w + 0.06 * w * w);
 }
 
-// enemies spawned per second (before player-count scaling)
+// enemies spawned per second (before player-count scaling): a gentle ramp
 export function spawnRate(w, boss) {
-  const r = 1.0 + w * 0.36;
-  return boss ? r * 0.35 : r;
+  const r = 0.4 + w * 0.04 + w * w * 0.0018;
+  return boss ? r * 0.4 : r;
 }
 
 export function hpScale(w, players) {
-  return (1 + 0.2 * (w - 1) + 0.013 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
+  return (1 + 0.12 * (w - 1) + 0.012 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
 }
 
 export function dmgScale(w) {
-  return 1 + 0.09 * (w - 1);
+  return 1 + 0.055 * (w - 1);
 }
 
 export function eliteChance(w) {
-  return w >= 6 ? 0.025 + 0.004 * w : 0;
+  return w >= 9 ? 0.03 + 0.004 * w : 0;
 }
 
 export function xpForLevel(lvl, players = 1) {

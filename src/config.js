@@ -9,8 +9,8 @@ export const ARENA_H = 1200;
 
 export const MAX_PLAYERS = 8;
 export const MAX_WEAPONS = 4;
-export const FINAL_WAVE = 15;
-export const BOSS_WAVES = [5, 10, 15];
+export const FINAL_WAVE = 30;
+export const BOSS_WAVES = [5, 10, 15, 20, 25, 30];
 
 export const PLAYER_RADIUS = 14;
 export const DASH_TICKS = 10;           // dash duration (~0.17 s)

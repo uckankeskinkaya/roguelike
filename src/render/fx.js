@@ -22,6 +22,7 @@ export class FX {
     this.kick = 0;         // camera kick (recoil) in aim direction
     this.kickX = 0; this.kickY = 0;
     this.shakeScale = 1;
+    this.deviceScale = 1;  // touch/gamepad get gentler shake: small screens amplify it
     this.hitstopMs = 0;    // requested by events; the game loop consumes it
   }
 
@@ -31,7 +32,7 @@ export class FX {
     this.trauma = 0; this.hurtFlash = 0; this.whiteFlash = 0; this.banner = null;
   }
 
-  shake(a) { this.trauma = Math.min(1, this.trauma + a * this.shakeScale); }
+  shake(a) { this.trauma = Math.min(1, this.trauma + a * this.shakeScale * this.deviceScale); }
 
   showBanner(text, sub = '', color = '#e8f1ff', dur = 2.2) {
     this.banner = { text, sub, color, t: 0, dur };
@@ -57,8 +58,8 @@ export class FX {
           if (w.kind !== 'flame') ps.add(P.FLASH, x + Math.cos(a) * 6, y + Math.sin(a) * 6, 0, 0, 0.06, 18, w.color);
           if (mine) {
             this.shake(w.shake);
-            this.kickX -= Math.cos(a) * w.shake * 14;
-            this.kickY -= Math.sin(a) * w.shake * 14;
+            this.kickX -= Math.cos(a) * w.shake * 14 * this.deviceScale * this.shakeScale;
+            this.kickY -= Math.sin(a) * w.shake * 14 * this.deviceScale * this.shakeScale;
             sfx(w.sfx, { vol: 0.9 });
           } else {
             const s = spatial(x, y);

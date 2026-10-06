@@ -173,7 +173,7 @@ function bossAI(sim, e, t, sp) {
     // clear some bullets to give the players a breather and a sense of impact
     for (const b of sim.ebullets) if (Math.hypot(b.x - e.x, b.y - e.y) < 260) b.dead = true;
   }
-  const lvl = e.lvl || 1; // 1, 2, 3 for waves 5, 10, 15
+  const lvl = Math.min(e.lvl || 1, 4); // pattern density caps at the 4th boss; HP keeps scaling
   e.ang += enraged ? 0.025 : 0.012;
 
   if (e.state === 0) { // idle: drift toward target

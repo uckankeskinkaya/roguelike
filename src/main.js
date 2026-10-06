@@ -543,7 +543,7 @@ input.onPause = () => {
   else togglePause();
 };
 input.onNav = (dir) => { if (ui.current || !$('scr-pick').hidden) ui.nav(dir); };
-input.onDevice = (d) => { document.body.dataset.device = d; };
+input.onDevice = (d) => { document.body.dataset.device = d; fx.deviceScale = d === 'touch' ? 0.3 : d === 'gamepad' ? 0.7 : 1; };
 
 // audio needs a user gesture
 const unlock = () => { initAudio(); applySettings(); };

@@ -95,17 +95,19 @@ export function drawHUD(r, view, localPid, info) {
   let sub = '';
   if (view.phase === 'wave') {
     title = `DALGA ${view.wave} / ${FINAL_WAVE}`;
-    if (view.waveTicks > 0) sub = `${Math.ceil(view.waveTicks / TICK_RATE)}`;
+    if (view.waveTicks > 0) sub = `${view.waveTicks}`;
   } else if (view.phase === 'pick') title = view.wave === 0 ? 'SİLAHINI SEÇ' : 'GÜÇLENDİRME';
   else if (view.phase === 'countdown') title = `DALGA ${view.wave + 1} / ${FINAL_WAVE}`;
   ctx.font = `800 ${14 * S}px system-ui, sans-serif`;
   ctx.fillStyle = '#c9d6ff';
   ctx.fillText(title, cx, pad + 12);
   if (sub) {
-    const secs = +sub;
-    ctx.font = `800 ${30 * S}px ui-monospace, Menlo, Consolas, monospace`;
-    ctx.fillStyle = secs <= 5 ? '#ff4d6d' : '#ffffff';
-    ctx.fillText(sub, cx, pad + 44 * S);
+    ctx.font = `800 ${28 * S}px ui-monospace, Menlo, Consolas, monospace`;
+    ctx.fillStyle = +sub <= 5 ? '#7dff6a' : '#ffffff';
+    ctx.fillText(sub, cx, pad + 42 * S);
+    ctx.font = `600 ${10 * S}px system-ui, sans-serif`;
+    ctx.fillStyle = 'rgba(200,214,255,0.55)';
+    ctx.fillText('KALAN DÜŞMAN', cx, pad + 54 * S);
   }
 
   // boss bar
