@@ -595,7 +595,7 @@ export class Sim {
     const def = ENEMIES[type];
     const hs = hpScale(Math.max(1, this.wave), this.connectedCount());
     let hp = def.hp * hs;
-    if (def.boss) hp = def.hp * (1 + (this.bossLevel() - 1) * 1.1) * (1 + 0.6 * (this.connectedCount() - 1));
+    if (def.boss) hp = def.hp * (1 + (this.bossLevel() - 1) * 1.1) * (1 + 0.9 * (this.connectedCount() - 1));
     const e = {
       id: this.id(), type, x, y, px: x, py: y,
       vx: 0, vy: 0, kx: 0, ky: 0,
@@ -855,7 +855,7 @@ export class Sim {
       this.xp -= this.xpNext;
       this.level++;
       this.levelsThisWave++;
-      this.xpNext = xpForLevel(this.level);
+      this.xpNext = xpForLevel(this.level, this.connectedCount());
       this.emit('levelup', this.level);
     }
   }
@@ -943,7 +943,7 @@ export class Sim {
     const cap = 120 + 25 * (this.connectedCount() - 1);
     if (this.enemies.length + this.teles.length < cap) {
       const ramp = boss ? 1 : 0.6 + 0.8 * (1 - this.waveTicks / this.waveLen);
-      this.spawnAcc += spawnRate(this.wave, boss) * ramp * (1 + 0.5 * (this.connectedCount() - 1)) * DT;
+      this.spawnAcc += spawnRate(this.wave, boss) * ramp * (1 + 0.6 * (this.connectedCount() - 1)) * DT;
       while (this.spawnAcc >= 1) { this.spawnAcc--; this.spawnFromPool(); }
     }
     if (!boss) {

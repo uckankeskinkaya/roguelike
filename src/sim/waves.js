@@ -22,24 +22,24 @@ export function waveDuration(w) {
 
 // enemies spawned per second (before player-count scaling)
 export function spawnRate(w, boss) {
-  const r = 0.85 + w * 0.3;
+  const r = 1.0 + w * 0.36;
   return boss ? r * 0.35 : r;
 }
 
 export function hpScale(w, players) {
-  return (1 + 0.17 * (w - 1) + 0.008 * (w - 1) * (w - 1)) * (1 + 0.45 * (players - 1));
+  return (1 + 0.2 * (w - 1) + 0.013 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
 }
 
 export function dmgScale(w) {
-  return 1 + 0.07 * (w - 1);
+  return 1 + 0.09 * (w - 1);
 }
 
 export function eliteChance(w) {
   return w >= 6 ? 0.025 + 0.004 * w : 0;
 }
 
-export function xpForLevel(lvl) {
-  return Math.round(8 + lvl * 5 + lvl * lvl * 0.6);
+export function xpForLevel(lvl, players = 1) {
+  return Math.round((8 + lvl * 5 + lvl * lvl * 0.6) * (1 + 0.4 * (players - 1)));
 }
 
 export function poolFor(w) {

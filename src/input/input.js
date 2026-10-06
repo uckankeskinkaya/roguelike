@@ -44,6 +44,8 @@ export class Input {
 
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => this.pointerDown(e));
+    // taps on menus also count as "using touch" (for hints and touch controls)
+    addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') this.setDevice('touch'); }, { capture: true });
     addEventListener('pointermove', (e) => this.pointerMove(e));
     addEventListener('pointerup', (e) => this.pointerUp(e));
     addEventListener('pointercancel', (e) => this.pointerUp(e));

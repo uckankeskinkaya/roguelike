@@ -70,7 +70,9 @@ export class FX {
           const [, x, y, dmg, crit, pid] = ev;
           const mine = pid === localPid;
           ps.burst(x, y, crit ? 6 : 3, crit ? '#ffe066' : '#ffffff', 280, 0.18, 2);
-          if (this.showNumbers !== false) this.texts.push({ x: x + (Math.random() - 0.5) * 14, y, vy: -70, t: 0, life: crit ? 0.9 : 0.6, text: String(dmg), crit, dim: !mine });
+          // tiny ticks (flames, needles) would bury the screen in digits: sample them
+          const show = this.showNumbers !== false && (crit || dmg > 4 || Math.random() < 0.3);
+          if (show) this.texts.push({ x: x + (Math.random() - 0.5) * 14, y, vy: -70, t: 0, life: crit ? 0.9 : 0.6, text: String(dmg), crit, dim: !mine });
           if (this.texts.length > 90) this.texts.shift();
           if (mine) sfx(crit ? 'crit' : 'hit', { vol: 0.8, pitch: 0.9 + Math.random() * 0.25 });
           break;
@@ -156,7 +158,7 @@ export class FX {
           const [, pid, x, y] = ev;
           ps.burst(x, y, 30, PLAYER_COLORS[pid], 300, 0.8, 3);
           sfx('down');
-          if (pid === localPid) this.showBanner('YERE DÜŞTÜN', 'Bir takım arkadaşın yanına gelip seni kaldırabilir', '#ff4d6d', 3);
+          if (pid === localPid && !this.solo) this.showBanner('YERE DÜŞTÜN', 'Bir takım arkadaşın yanına gelip seni kaldırabilir', '#ff4d6d', 3);
           break;
         }
         case 'revive': {

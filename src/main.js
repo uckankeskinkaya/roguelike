@@ -381,7 +381,10 @@ function frame(now) {
   ui.gamepadMode = input.device === 'gamepad';
 
   const pickVisible = !$('scr-pick').hidden;
+  $('btn-pause').hidden = !inGame() || !!ui.current;
+  fx.solo = G.mode === 'single';
   input.enabled = !ui.current && !pickVisible;
+  if (!input.enabled) input.dashLatch = false; // e.g. the A press that picked a card
 
   let view = null, alpha = 1, localPos = null;
   if (G.sim && (G.mode === 'single' || G.mode === 'host')) {
@@ -535,7 +538,10 @@ addEventListener('keydown', (e) => {
   }
 });
 
-input.onPause = () => togglePause();
+input.onPause = () => {
+  if (['scr-settings', 'scr-help', 'scr-join'].includes(ui.current)) ui.back();
+  else togglePause();
+};
 input.onNav = (dir) => { if (ui.current || !$('scr-pick').hidden) ui.nav(dir); };
 input.onDevice = (d) => { document.body.dataset.device = d; };
 
@@ -549,7 +555,12 @@ addEventListener('resize', () => renderer.resize());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && G.mode === 'single' && G.sim && !ui.current) togglePause();
 });
-addEventListener('beforeunload', () => leaveNetwork());
+// On reload/close a client does NOT say "bye": the host keeps its character so
+// the same tab can reclaim it. Hosts always notify clients that the room ended.
+addEventListener('pagehide', () => {
+  if (G.host) G.host.close();
+  if (G.net) G.net.close(false);
+});
 
 // PWA: install prompt + service worker
 let installEvt = null;

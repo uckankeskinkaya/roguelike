@@ -207,6 +207,8 @@ export class UI {
       el.addEventListener('click', () => {
         if (el.disabled) return;
         for (const b of box.querySelectorAll('.card')) b.disabled = true;
+        // if the (remote) host ignores the pick, don't leave the cards locked
+        setTimeout(() => { if (el.isConnected) for (const b of box.querySelectorAll('.card')) b.disabled = false; }, 1500);
         onPick(i);
       });
       box.append(el);

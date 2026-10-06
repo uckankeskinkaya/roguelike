@@ -145,7 +145,7 @@ export class Renderer {
     this.drawArena(view);
     for (const k of view.pickups) this.drawPickup(k, ipos(k));
     for (const t of view.teles) this.drawTele(t);
-    for (const e of view.enemies) this.drawEnemyShadow(e, ipos(e));
+    this.drawShadows(view.enemies, ipos);
     for (const e of view.enemies) this.drawEnemy(e, ipos(e), view, me);
     for (const p of view.players) {
       if (p.pid === localPid) continue;
@@ -213,11 +213,21 @@ export class Renderer {
 
   drawArena(view) {
     const { ctx } = this;
+    // only rasterize the visible part of the floor and decal layer
+    const z = this.cam.zoom;
+    const m = 60;
+    const vx0 = Math.max(0, Math.floor(this.cam.x - this.w / 2 / z - m));
+    const vy0 = Math.max(0, Math.floor(this.cam.y - this.h / 2 / z - m));
+    const vx1 = Math.min(ARENA_W, Math.ceil(this.cam.x + this.w / 2 / z + m));
+    const vy1 = Math.min(ARENA_H, Math.ceil(this.cam.y + this.h / 2 / z + m));
     ctx.fillStyle = this.floorPattern;
-    ctx.fillRect(0, 0, ARENA_W, ARENA_H);
-    ctx.globalAlpha = 0.9;
-    ctx.drawImage(this.decal, 0, 0, ARENA_W, ARENA_H);
-    ctx.globalAlpha = 1;
+    ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+    const dx0 = vx0 >> 1, dy0 = vy0 >> 1, dw = (vx1 - vx0) >> 1, dh = (vy1 - vy0) >> 1;
+    if (dw > 0 && dh > 0) {
+      ctx.globalAlpha = 0.9;
+      ctx.drawImage(this.decal, dx0, dy0, dw, dh, dx0 * 2, dy0 * 2, dw * 2, dh * 2);
+      ctx.globalAlpha = 1;
+    }
     // central sigil
     ctx.save();
     ctx.translate(ARENA_W / 2, ARENA_H / 2);
@@ -304,11 +314,15 @@ export class Renderer {
     }
   }
 
-  drawEnemyShadow(e, p) {
+  drawShadows(list, ipos) {
     const { ctx } = this;
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
-    ctx.ellipse(p.x + 3, p.y + e.r * 0.75, e.r * 0.9, e.r * 0.35, 0, 0, TAU);
+    for (const e of list) {
+      const p = ipos(e);
+      ctx.moveTo(p.x + 3 + e.r * 0.9, p.y + e.r * 0.75);
+      ctx.ellipse(p.x + 3, p.y + e.r * 0.75, e.r * 0.9, e.r * 0.35, 0, 0, TAU);
+    }
     ctx.fill();
   }
 
@@ -486,7 +500,8 @@ export class Renderer {
       }
     }
     // body
-    ctx.fillStyle = flash ? '#ffffff' : '#1a0710';
+    // a constantly-hit boss would be permanently white: tint instead of fill
+    ctx.fillStyle = flash ? '#5a1f2e' : '#1a0710';
     ctx.strokeStyle = flash ? '#fff' : col;
     ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); ctx.stroke();
@@ -496,7 +511,7 @@ export class Renderer {
       const a = Math.atan2(me.y - p.y, me.x - p.x);
       ex = Math.cos(a) * r * 0.3; ey = Math.sin(a) * r * 0.3;
     }
-    ctx.fillStyle = flash ? '#fff' : '#ffd0d8';
+    ctx.fillStyle = '#ffd0d8';
     ctx.beginPath(); ctx.ellipse(ex * 0.5, ey * 0.5, r * 0.55, r * 0.38, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = col;
     ctx.beginPath(); ctx.arc(ex, ey, r * 0.24, 0, TAU); ctx.fill();
@@ -704,22 +719,12 @@ export class Renderer {
   }
 
   drawEBullets(view, ipos) {
+    // one pre-rendered sprite per (style, radius): enemy bullets can number in the hundreds
     const { ctx } = this;
-    ctx.globalCompositeOperation = 'lighter';
     for (const b of view.ebullets) {
       const p = ipos(b);
-      const col = EB_COLORS[b.style] || '#ff3355';
-      const s = b.r * 3;
-      ctx.drawImage(glow(col, 32), p.x - s, p.y - s, s * 2, s * 2);
-    }
-    ctx.globalCompositeOperation = 'source-over';
-    for (const b of view.ebullets) {
-      const p = ipos(b);
-      const col = EB_COLORS[b.style] || '#ff3355';
-      ctx.fillStyle = col;
-      ctx.beginPath(); ctx.arc(p.x, p.y, b.r, 0, TAU); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(p.x, p.y, b.r * 0.55, 0, TAU); ctx.fill();
+      const spr = ebSprite(b.style, b.r);
+      ctx.drawImage(spr, p.x - spr.width / 2, p.y - spr.height / 2);
     }
   }
 
@@ -810,6 +815,27 @@ export class Renderer {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.drawImage(lightC, 0, 0, this.w, this.h);
   }
+}
+
+const ebCache = new Map();
+function ebSprite(style, r) {
+  const key = style * 1000 + Math.round(r * 4);
+  let c = ebCache.get(key);
+  if (c) return c;
+  const col = EB_COLORS[style] || '#ff3355';
+  const R = Math.ceil(r * 3);
+  c = document.createElement('canvas');
+  c.width = c.height = R * 2;
+  const g = c.getContext('2d');
+  g.globalCompositeOperation = 'lighter';
+  g.drawImage(glow(col, 32), 0, 0, R * 2, R * 2);
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = col;
+  g.beginPath(); g.arc(R, R, r, 0, TAU); g.fill();
+  g.fillStyle = '#ffffff';
+  g.beginPath(); g.arc(R, R, r * 0.55, 0, TAU); g.fill();
+  ebCache.set(key, c);
+  return c;
 }
 
 function makeLightSprite() {
