@@ -129,8 +129,8 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
 - **Co-op eşitliği:** XP ve seviye takımın ortak değeri. Seviye atlayınca, sandık/sunak açılınca ve
   Muhafız yenilince **herkese aynı anda, aynı sayıda** seçim hakkı gelir; oyun herkes seçene kadar durur.
   Geç katılan ya da bağlantısı kopan oyuncu kaçırdığı seviyelerin seçimlerini geri alır.
-  **Zorluk takım boyutuna göre ölçeklenir:** düşman sayısı ve XP ihtiyacı `1 + 0.4·(n−1)`, düşman canı
-  `1 + 0.55·(n−1)` kadar artar.
+  **Zorluk takım boyutuna göre ölçeklenir:** düşman sayısı ve XP ihtiyacı `1 + 0.55·(n−1)`, düşman canı
+  `1 + 0.85·(n−1)` kadar artar.
 - **Düşmanlar:** Sürüngen, Sinek (sürü), Tükürgen (menzilli), Kaya (hücumcu), Bombacı,
   Ok (çizgi atılması), Bölünen + Yavru, Fırıldak (halka mermi), elit varyantlar ve boss.
 

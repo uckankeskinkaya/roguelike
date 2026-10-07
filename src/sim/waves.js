@@ -19,8 +19,8 @@ export function isFinalWave(w) { return w >= FINAL_WAVE; }
 // Team scaling. Enemy health grows a bit slower than head count so a bigger team
 // is challenged without becoming a damage sponge race; enemy numbers and XP
 // requirements scale together so everybody levels at the same pace.
-export function teamHp(n) { return 1 + 0.55 * (n - 1); }
-export function teamCount(n) { return 1 + 0.4 * (n - 1); }
+export function teamHp(n) { return 1 + 0.85 * (n - 1); }
+export function teamCount(n) { return 1 + 0.55 * (n - 1); }
 
 // Waves have no timer: each one is a quota of enemies. It ends when the
 // whole quota has spawned and been killed.
