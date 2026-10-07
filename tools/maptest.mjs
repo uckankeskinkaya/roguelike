@@ -16,7 +16,7 @@ for (let n = 0; n < 40; n++) {
   ok(JSON.stringify(m.obstacles) === JSON.stringify(m2.obstacles) && JSON.stringify(m.pois) === JSON.stringify(m2.pois), `deterministic ${n}`);
   const counts = {};
   for (const p of m.pois) counts[p.type + p.tier] = (counts[p.type + p.tier] || 0) + 1;
-  ok(counts.chest1 === 3 && counts.shrine0 === 3 && counts.pylon0 === 2 && counts.fountain0 === 3 && counts.totem0 === 3 && counts.chest0 === 6, `poi counts ${n} ${JSON.stringify(counts)}`);
+  ok(counts.chest1 === 4 && counts.shrine0 === 5 && counts.pylon0 === 3 && counts.fountain0 === 5 && counts.totem0 === 4 && counts.chest0 === 10, `poi counts ${n} ${JSON.stringify(counts)}`);
   // flood fill walkable cells (player radius 14) from the center
   const walk = new Uint8Array(GW * GH);
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) walk[y * GW + x] = m.blocked(x * CELL + 20, y * CELL + 20, 14) ? 0 : 1;
@@ -38,9 +38,11 @@ for (let n = 0; n < 40; n++) {
 // 2) structures in a live sim
 const sim = new Sim(hashSeed('POI'), 'POI');
 const p = sim.addPlayer('a', 'A');
+const fogCheck = () => sim.explored.reduce((a, b) => a + b, 0);
 const inputs = new Map();
 const events = [];
-const run = (ticks) => { for (let i = 0; i < ticks; i++) { p.iframes = 1e9; sim.step(inputs); for (const e of sim.drainEvents()) events.push(e); } };
+let taken = 0;
+const run = (ticks) => { for (let i = 0; i < ticks; i++) { p.iframes = 1e9; while (p.picks > 0 && sim.choose(0, 0)) taken++; sim.step(inputs); for (const e of sim.drainEvents()) events.push(e); } };
 sim.choose(0, 0);
 run(60 * 6);
 ok(sim.phase === 'wave', 'wave started');
@@ -48,10 +50,14 @@ const at = (poi) => { p.x = poi.x; p.y = poi.y; p.vx = p.vy = 0; };
 const byType = (t, tier = 0) => sim.pois.find((q) => q.type === t && q.tier === tier && !q.locked);
 
 const chest = byType('chest');
-const before = Object.values(p.skills).reduce((a, b) => a + b, 0) + p.weapons.reduce((a, w) => a + w.tier, 0);
-at(chest); run(100);
-const after = Object.values(p.skills).reduce((a, b) => a + b, 0) + p.weapons.reduce((a, w) => a + w.tier, 0);
-ok(chest.state === 2 && after === before + 1, `chest gives 1 upgrade (${before}->${after}, state ${chest.state})`);
+const t0 = taken;
+at(chest);
+for (let i = 0; i < 100 && !p.picks; i++) run(1);
+ok(chest.state === 2 && p.picks === 1 && p.choices.length === 3, `chest offers 3 choices (picks ${p.picks}, choices ${p.choices.length})`);
+const f0 = sim.tick; sim.step(inputs); sim.step(inputs);
+ok(sim.isFrozen() && sim.enemies.every((e) => e.px === e.x), 'game is frozen while a pick is pending');
+run(2);
+ok(taken === t0 + 1 && !sim.isFrozen(), 'choosing unfreezes the game');
 
 p.hp = 10;
 const fountain = byType('fountain');
@@ -65,11 +71,11 @@ ok(totem.state === 2 && p.buffT > 0, 'totem buffs');
 const shrine = byType('shrine');
 at(shrine); run(130);
 ok(shrine.state === 1 && shrine.total > 0, 'shrine ambush started');
-const sk0 = Object.values(p.skills).reduce((a, b) => a + b, 0) + p.weapons.reduce((a, w) => a + w.tier, 0);
+const sk0 = taken;
 for (let i = 0; i < 60 * 40 && shrine.state === 1; i++) { run(1); for (const e of sim.enemies) if (e.poi === shrine.id) e.hp = 0, e.dead = true; }
+run(4);
 ok(shrine.state === 2, 'shrine completes when ambush is dead');
-const sk1 = Object.values(p.skills).reduce((a, b) => a + b, 0) + p.weapons.reduce((a, w) => a + w.tier, 0);
-ok(sk1 === sk0 + 2, `shrine gives 2 upgrades (${sk0}->${sk1})`);
+ok(taken === sk0 + 2, `shrine gives 2 picks (${taken - sk0})`);
 
 const pylon = byType('pylon');
 at(pylon); run(100);
@@ -77,6 +83,13 @@ ok(pylon.state === 1, 'pylon charging');
 const xp0 = sim.xp + sim.level * 1000;
 run(1300);
 ok(pylon.state === 2, `pylon completes (charge ${pylon.charge})`);
+
+// fog of war
+ok(fogCheck() > 0, 'start area is explored');
+const e0 = fogCheck();
+p.x += 1500; run(30);
+ok(fogCheck() > e0, 'moving reveals more map');
+ok(sim.exploredVer > 1, 'explored version bumps');
 
 // guardian: asleep until near, locked chest opens after the kill
 const gold = sim.pois.find((q) => q.tier === 1);
@@ -88,9 +101,11 @@ p.x = g.x + 400; p.y = g.y; run(5);
 ok(!g.asleep, 'guardian wakes when a player approaches');
 for (let i = 0; i < 600; i++) { run(1); }
 ok(sim.ebullets.length > 0 || g.pt > 0, 'guardian attacks');
+const gp0 = taken;
 g.hp = 1; sim.damageEnemy(g, 50, p, 0, 0);
 run(2);
 ok(g.dead && !gold.locked, 'killing the guardian unlocks the gold chest');
+ok(taken - gp0 >= 2, 'guardian reward is 2 picks');
 
 // wave must be clearable while a guardian lives on
 const sim2 = new Sim(hashSeed('W'), 'W');
@@ -99,6 +114,7 @@ sim2.choose(0, 0);
 let ended = false;
 for (let i = 0; i < 60 * 120 && !ended; i++) {
   q.iframes = 1e9;
+  while (q.picks > 0 && sim2.choose(0, 0));
   sim2.step(inputs);
   for (const ev of sim2.drainEvents()) if (ev[0] === 'waveend') ended = true;
   for (const e of sim2.enemies) if (!e.guardian && Math.hypot(e.x - q.x, e.y - q.y) < 900) { e.hp = 0; e.dead = true; }

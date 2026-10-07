@@ -18,7 +18,7 @@ for (let t = 0; t < 60 * 60 * 60 && sim.phase !== 'victory' && sim.phase !== 'ga
     p.iframes = 1e9;
     const a = t * 0.01 + p.pid;
     inputs.set(p.pid, { mx: Math.cos(a), my: Math.sin(a * 1.3), ax: 0, ay: 0, dash: t % 90 === 0, seq: t });
-    if (p.picks > 0 && sim.phase === 'pick' && t % 20 === 0) sim.choose(p.pid, t % 3);
+    if (p.picks > 0) sim.choose(p.pid, t % 3);
   }
   sim.step(inputs);
   evCount += sim.drainEvents().length;

@@ -18,6 +18,7 @@ for (let t = 0; t < 60 * 40; t++) {
   const a = t * 0.02;
   const input = { mx: Math.cos(a), my: Math.sin(a * 1.3), ax: 0, ay: 0, dash: t % 120 === 0, seq: t + 1 };
   inputs.set(0, input);
+  while (p.picks > 0) sim.choose(0, 0);
   sim.step(inputs);
   const ev = sim.drainEvents();
   now += 1000 / 60;

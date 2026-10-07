@@ -37,7 +37,7 @@ for (let r = 0; r < runs; r++) {
   while (sim.phase !== 'gameover' && sim.phase !== 'victory' && t < 60 * 60 * 45) {
     for (const p of sim.players) {
       inputs.set(p.pid, botInput(sim, p, t));
-      if (p.picks > 0 && sim.phase === 'pick') {
+      while (p.picks > 0) {
         // prefer weapon upgrades / damage
         const i = p.choices.findIndex((c) => c.t === 'w' || c.id === 'guc' || c.id === 'atis');
         sim.choose(p.pid, Math.max(0, i));
@@ -46,7 +46,7 @@ for (let r = 0; r < runs; r++) {
     const w = sim.wave;
     if (bonus && sim.phase === 'wave' && sim.wave !== lastBonusWave) {
       lastBonusWave = sim.wave;
-      for (const p of sim.players) { let n = bonus; while (n > 0) { if (Math.random() < Math.min(1, n)) sim.grantLoot(p, 1); n -= 1; } }
+      for (const p of sim.players) { let n = bonus; while (n > 0) { if (Math.random() < Math.min(1, n)) sim.queuePicks(p, 1); n -= 1; } }
     }
     sim.step(inputs);
     sim.drainEvents();

@@ -2,10 +2,10 @@
 // Single-player and the co-op host both run this; clients only render snapshots.
 import {
   DT, TICK_RATE, ARENA_W, ARENA_H, PLAYER_RADIUS, MAX_WEAPONS, FINAL_WAVE,
-  PICK_TIMEOUT, REVIVE_TICKS, DASH_TICKS,
+  PICK_TIMEOUT, REVIVE_TICKS, DASH_TICKS, EXPLORE_W, EXPLORE_H, EXPLORE_R,
 } from '../config.js';
 import { RNG } from '../rng.js';
-import { genMap, POI_DEFS, POI_TYPES } from './map.js';
+import { genMap, POI_DEFS, POI_TYPES, revealCells, isExplored, packExplored } from './map.js';
 import { WEAPONS, WEAPON_IDS, STARTER_WEAPONS, MAX_TIER, weaponStats } from './weapons.js';
 import { SKILLS, SKILL_BY_ID, computeStats } from './skills.js';
 import { ENEMIES, AI, clampToArena, BURN_TICKS, GUARDIAN_KITS } from './enemies.js';
@@ -48,15 +48,17 @@ export class Sim {
     this.seedStr = seedStr;
     this.rng = new RNG(seedNum);
     this.tick = 0;
-    this.phase = 'pick';       // pick | countdown | wave | gameover | victory
+    this.phase = 'countdown';  // countdown | wave | gameover | victory (picks freeze the game, see isFrozen)
     this.wave = 0;
     this.waveTicks = 0;
-    this.countdown = 0;
-    this.pickTimer = PICK_TIMEOUT;
+    this.countdown = 60;
+    this.pickTimer = 0;
+    this.frozen = false;
+    this.explored = new Uint8Array(EXPLORE_W * EXPLORE_H);
+    this.exploredVer = 1;
     this.level = 1;
     this.xp = 0;
     this.xpNext = xpForLevel(1);
-    this.levelsThisWave = 0;
     this.players = [];
     this.enemies = [];
     this.bullets = [];
@@ -111,14 +113,15 @@ export class Sim {
     };
     p.px = p.x; p.py = p.y;
     p.hp = p.st.maxHp;
-    if (this.wave === 0 && this.phase === 'pick') {
+    if (this.wave === 0) {
       p.picks = 1;
       p.choices = this.starterChoices();
     } else {
-      // late joiner: starter weapon now, catch-up picks at the next intermission
+      // late joiner: starter weapon now, plus a few catch-up picks for the levels they missed
       this.giveWeapon(p, 'kivilcim');
-      p.catchUp = Math.max(0, this.level - 1);
-      if (this.phase === 'pick') { p.picks = 1 + p.catchUp; p.catchUp = 0; p.choices = this.genChoices(p); }
+      this.players.push(p);
+      this.queuePicks(p, Math.min(4, Math.max(0, this.level - 1)));
+      return p;
     }
     this.players.push(p);
     return p;
@@ -186,7 +189,7 @@ export class Sim {
 
   choose(pid, index) {
     const p = this.playerByPid(pid);
-    if (!p || p.picks <= 0 || this.phase !== 'pick') return false;
+    if (!p || p.picks <= 0) return false;
     const c = p.choices[index];
     if (!c) return false;
     if (c.t === 'w') this.giveWeapon(p, c.id);
@@ -197,15 +200,70 @@ export class Sim {
     }
     p.picks--;
     p.choices = p.picks > 0 ? this.genChoices(p) : [];
+    if (!p.choices.length) p.picks = 0; // nothing left to offer
     p.buildVer++;
     this.emit('pick', p.pid, c.t, c.id);
     return true;
+  }
+
+  // Level-ups, chests, shrines and guardians all hand out *picks*: a player with
+  // pending picks sees 3 cards, and the whole simulation is frozen until
+  // everybody has chosen (co-op auto-picks after PICK_TIMEOUT).
+  queuePicks(p, n) {
+    if (n <= 0 || !p.connected) return;
+    if (!p.choices.length) p.choices = p.weapons.length ? this.genChoices(p) : this.starterChoices();
+    if (!p.choices.length) return; // everything is maxed out
+    p.picks += n;
+    p.buildVer++;
+    this.emit('picks', p.pid, n);
+  }
+
+  // Fog of war: every connected player reveals the map around them (shared by the team)
+  stepExplore() {
+    let n = 0;
+    for (const p of this.players) if (p.connected) n += revealCells(this.explored, p.x, p.y, EXPLORE_R);
+    if (!n) return;
+    this.exploredVer++;
+    for (const q of this.pois) {
+      if (q.found || !isExplored(this.explored, q.x, q.y)) continue;
+      q.found = true;
+      this.emit('found', q.id, POI_TYPES.indexOf(q.type), Math.round(q.x), Math.round(q.y), q.tier);
+    }
+  }
+
+  exploredPacked() { return packExplored(this.explored); }
+
+  isFrozen() {
+    for (const p of this.players) if (p.connected && p.picks > 0) return true;
+    return false;
+  }
+
+  pickTimeout() { return this.connectedCount() > 1 ? PICK_TIMEOUT : 1e9; }
+
+  stepFrozen(inputs) {
+    // nothing moves: keep interpolation anchors on the current positions
+    for (const p of this.players) { p.px = p.x; p.py = p.y; }
+    for (const e of this.enemies) { e.px = e.x; e.py = e.y; }
+    for (const b of this.bullets) { b.px = b.x; b.py = b.y; }
+    for (const b of this.ebullets) { b.px = b.x; b.py = b.y; }
+    for (const k of this.pickups) { k.px = k.x; k.py = k.y; }
+    for (const p of this.players) { const i = inputs.get(p.pid); if (i && i.seq) p.lastSeq = i.seq; }
+    if (!this.frozen) { this.frozen = true; this.pickTimer = this.pickTimeout(); }
+    if (--this.pickTimer <= 0) {
+      for (const p of this.players) {
+        if (!p.connected) continue;
+        while (p.picks > 0 && this.choose(p.pid, 0));
+        p.picks = 0; p.choices = [];
+      }
+    }
   }
 
   // ------------------------------------------------------------- main step
   step(inputs) {
     this.tick++;
     if (this.phase === 'gameover' || this.phase === 'victory') return;
+    if (this.isFrozen()) { this.stepFrozen(inputs); return; }
+    this.frozen = false;
 
     for (const p of this.players) { p.px = p.x; p.py = p.y; }
     for (const e of this.enemies) { e.px = e.x; e.py = e.y; }
@@ -218,8 +276,8 @@ export class Sim {
 
     for (const p of this.players) this.stepPlayer(p, inputs.get(p.pid));
 
-    if (this.phase === 'pick') this.stepPick();
-    else if (this.phase === 'countdown') {
+    if (this.tick % 10 === 0) this.stepExplore();
+    if (this.phase === 'countdown') {
       if (--this.countdown <= 0) this.startWave();
     } else if (this.phase === 'wave') this.stepWave();
 
@@ -614,7 +672,7 @@ export class Sim {
       r: def.r * (elite ? 1.3 : 1),
       hp: hp * (elite ? 3 : 1), maxHp: hp * (elite ? 3 : 1),
       dmg: def.dmg * dmgScale(Math.max(1, this.wave)) * (elite ? 1.4 : 1),
-      speed: def.speed * 0.88 * (1 + 0.008 * this.wave) * (elite ? 0.9 : 1),
+      speed: def.speed * 0.95 * (1 + 0.008 * this.wave) * (elite ? 0.9 : 1),
       mass: (def.mass || 1) * (elite ? 2 : 1),
       elite: !!elite, boss: !!def.boss,
       ang: 0, flash: 0, state: 0, st: 0,
@@ -886,9 +944,9 @@ export class Sim {
     while (this.xp >= this.xpNext) {
       this.xp -= this.xpNext;
       this.level++;
-      this.levelsThisWave++;
       this.xpNext = xpForLevel(this.level, this.connectedCount());
       this.emit('levelup', this.level);
+      for (const p of this.players) this.queuePicks(p, 1);
     }
   }
 
@@ -922,27 +980,9 @@ export class Sim {
     this.emit('stop', 140);
     this.dropXp(e.x, e.y, 20 + this.wave);
     for (let i = 0; i < 3; i++) this.pickups.push(this.mkPickup(e.x, e.y, PICKUP.HEART));
-    for (const p of this.players) if (p.connected) this.grantLoot(p, 2);
+    for (const p of this.players) this.queuePicks(p, 2);
     const chest = this.pois.find((q) => q.id === e.chest);
     if (chest) { chest.locked = false; this.emit('unlock', chest.id, Math.round(chest.x), Math.round(chest.y)); }
-  }
-
-  // Gives `n` random upgrades immediately (skills mostly, weapon tiers sometimes).
-  grantLoot(p, n) {
-    for (let i = 0; i < n; i++) {
-      const pool = [];
-      for (const sk of SKILLS) if ((p.skills[sk.id] || 0) < sk.max) pool.push({ t: 's', id: sk.id, wt: 1 });
-      for (const w of p.weapons) if (w.tier < MAX_TIER) pool.push({ t: 'w', id: w.id, wt: 0.9 });
-      if (!pool.length) return;
-      const c = this.rng.weighted(pool, (x) => x.wt);
-      if (c.t === 'w') this.giveWeapon(p, c.id);
-      else {
-        p.skills[c.id] = (p.skills[c.id] || 0) + 1;
-        this.recalc(p);
-        if (c.id === 'can') p.hp = p.st.maxHp;
-      }
-      this.emit('loot', p.pid, c.t, c.id);
-    }
   }
 
   playersNear(x, y, r) {
@@ -1026,7 +1066,7 @@ export class Sim {
     const x = Math.round(poi.x), y = Math.round(poi.y);
     switch (poi.type) {
       case 'chest':
-        for (const p of this.playersNear(poi.x, poi.y, 320)) this.grantLoot(p, poi.tier ? 2 : 1);
+        for (const p of this.playersNear(poi.x, poi.y, 320)) this.queuePicks(p, poi.tier ? 2 : 1);
         if (poi.tier) for (let i = 0; i < 3; i++) this.pickups.push(this.mkPickup(poi.x, poi.y, PICKUP.HEART));
         break;
       case 'fountain':
@@ -1040,7 +1080,7 @@ export class Sim {
         for (const p of this.players) if (p.connected) p.buffT = 45 * TICK_RATE;
         break;
       case 'shrine':
-        for (const p of this.players) if (p.connected) this.grantLoot(p, 2);
+        for (const p of this.players) this.queuePicks(p, 2);
         for (let i = 0; i < 2; i++) this.pickups.push(this.mkPickup(poi.x, poi.y, PICKUP.HEART));
         break;
       case 'pylon':
@@ -1053,45 +1093,9 @@ export class Sim {
   }
 
   // ----------------------------------------------------------------- waves
-  stepPick() {
-    if (this.assignPending) {
-      if (--this.pickDelay > 0 && this.pickups.length > 0) return;
-      for (const k of this.pickups) {
-        if (k.kind !== PICKUP.HEART) this.gainXp(k.v);
-        k.dead = true;
-      }
-      const base = Math.max(1, this.levelsThisWave);
-      this.levelsThisWave = 0;
-      this.assignPending = false;
-      this.pickTimer = this.pickTimeout();
-      for (const p of this.players) {
-        p.picks = base + (p.catchUp || 0);
-        p.catchUp = 0;
-        p.choices = this.genChoices(p);
-        if (!p.choices.length) p.picks = 0; // everything maxed out
-        p.buildVer++;
-      }
-      return;
-    }
-    const waiting = this.players.filter((p) => p.connected && p.picks > 0);
-    if (--this.pickTimer <= 0) {
-      for (const p of waiting) while (p.picks > 0 && this.choose(p.pid, 0));
-      for (const p of waiting) p.picks = 0;
-    }
-    if (waiting.length === 0 || this.pickTimer <= 0) {
-      this.phase = 'countdown';
-      this.countdown = Math.round(1.4 * TICK_RATE);
-      this.emit('countdown', this.wave + 1);
-    }
-  }
-
-  // solo: take all the time you want; co-op: auto-pick so nobody stalls the team
-  pickTimeout() { return this.connectedCount() > 1 ? PICK_TIMEOUT : 1e9; }
-
   startWave() {
     this.wave++;
     this.phase = 'wave';
-    this.levelsThisWave = 0;
     this.spawnAcc = 0;
     this.hordeDone = false;
     const boss = isBossWave(this.wave);
@@ -1110,7 +1114,7 @@ export class Sim {
       this.addTelegraph(c.x, c.y, 'gozcu', false, 110);
     } else {
       // opening pack so the arena is never empty
-      const n = 2 + Math.floor(this.wave / 4);
+      const n = 4 + Math.floor(this.wave / 3);
       for (let i = 0; i < n; i++) this.spawnFromPool();
     }
   }
@@ -1203,16 +1207,14 @@ export class Sim {
     for (const b of this.ebullets) b.dead = true;
     this.teles = [];
     for (const b of this.bullets) if (b.kind !== 'boomerang') b.dead = true;
-    this.phase = 'pick';
-    this.pickTimer = this.pickTimeout();
+    // gems left on the floor fly to the players during this short breather
+    this.phase = 'countdown';
+    this.countdown = Math.round(2.6 * TICK_RATE);
     for (const p of this.players) {
       if (p.downed) this.revive(p, 1);
     }
     this.emit('waveend', this.wave);
-    // gems on the floor fly to the players first; picks are assigned afterwards
-    this.assignPending = true;
-    this.pickDelay = 50;
-    for (const p of this.players) { p.picks = 0; p.choices = []; }
+    this.emit('countdown', this.wave + 1);
   }
 }
 

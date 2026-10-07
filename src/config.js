@@ -4,8 +4,14 @@ export const TICK_RATE = 60;            // simulation ticks per second
 export const DT = 1 / TICK_RATE;        // seconds per tick
 export const TICK_MS = 1000 / TICK_RATE;
 
-export const ARENA_W = 3600;
-export const ARENA_H = 2400;
+export const ARENA_W = 6400;
+export const ARENA_H = 4200;
+
+// Fog of war: the team reveals the map as it walks (shared in co-op)
+export const EXPLORE_CELL = 100;
+export const EXPLORE_W = Math.ceil(ARENA_W / EXPLORE_CELL);
+export const EXPLORE_H = Math.ceil(ARENA_H / EXPLORE_CELL);
+export const EXPLORE_R = 560;
 
 export const MAX_PLAYERS = 8;
 export const MAX_WEAPONS = 4;
@@ -15,7 +21,7 @@ export const BOSS_WAVES = [5, 10, 15, 20, 25, 30];
 export const PLAYER_RADIUS = 14;
 export const DASH_TICKS = 10;           // dash duration (~0.17 s)
 export const DASH_SPEED = 900;          // px/s while dashing
-export const PICK_TIMEOUT = 45 * TICK_RATE; // auto-pick after this many ticks in intermission
+export const PICK_TIMEOUT = 30 * TICK_RATE; // co-op: auto-pick after this long so nobody stalls the team
 export const REVIVE_TICKS = 2 * TICK_RATE;
 
 // Networking

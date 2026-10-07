@@ -11,6 +11,7 @@ import { dashCooldownTicks } from '../sim/player.js';
 import { REVIVE_TICKS } from '../config.js';
 
 const TAU = Math.PI * 2;
+const DEC = 4; // blood/scorch decals are stored at 1/4 resolution
 const EB_COLORS = ['#ff3d6e', '#7dff6a', '#3ee6ff', '#ff3355', '#ff5ad1'];
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -26,7 +27,7 @@ export class Renderer {
     this.frameDt = 1 / 60;
     this.aimSmooth = new Map();
     this.decal = document.createElement('canvas');
-    this.decal.width = ARENA_W / 2; this.decal.height = ARENA_H / 2;
+    this.decal.width = ARENA_W / DEC; this.decal.height = ARENA_H / DEC;
     this.dctx = this.decal.getContext('2d');
     this.lightC = document.createElement('canvas');
     this.lctx = this.lightC.getContext('2d');
@@ -73,7 +74,7 @@ export class Renderer {
   stampDecals() {
     const d = this.dctx;
     for (const s of this.fx.decals) {
-      const x = s.x / 2, y = s.y / 2, r = s.r / 2;
+      const x = s.x / DEC, y = s.y / DEC, r = s.r / DEC;
       if (s.scorch) {
         const g = d.createRadialGradient(x, y, 0, x, y, r);
         g.addColorStop(0, 'rgba(0,0,0,0.5)');
@@ -236,10 +237,10 @@ export class Renderer {
     ctx.fillStyle = this.floorPattern;
     ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
     if (view.map) drawZones(ctx, view.map, { x0: vx0, x1: vx1, y0: vy0, y1: vy1 });
-    const dx0 = vx0 >> 1, dy0 = vy0 >> 1, dw = (vx1 - vx0) >> 1, dh = (vy1 - vy0) >> 1;
+    const dx0 = Math.floor(vx0 / DEC), dy0 = Math.floor(vy0 / DEC), dw = Math.ceil((vx1 - vx0) / DEC), dh = Math.ceil((vy1 - vy0) / DEC);
     if (dw > 0 && dh > 0) {
       ctx.globalAlpha = 0.9;
-      ctx.drawImage(this.decal, dx0, dy0, dw, dh, dx0 * 2, dy0 * 2, dw * 2, dh * 2);
+      ctx.drawImage(this.decal, dx0, dy0, dw, dh, dx0 * DEC, dy0 * DEC, dw * DEC, dh * DEC);
       ctx.globalAlpha = 1;
     }
     // central sigil

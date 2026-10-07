@@ -218,6 +218,13 @@ export class FX {
           break;
         }
         case 'unlock': break;
+        case 'found': {
+          const [, , ti, , , tier] = ev;
+          const type = POI_TYPES[ti];
+          this.pushFeed(`Keşfedildi: ${poiName(type, tier)}`, type === 'chest' && tier ? GOLD_COLOR : POI_DEFS[type].color, 5);
+          sfx('loot', { vol: 0.5 });
+          break;
+        }
         case 'ring': ps.add(P.RING, ev[1], ev[2], 0, 0, 0.7, 30, GUARDIAN_COLORS[ev[3] || 0], 300); this.shake(0.4); sfx('bossphase', { vol: 0.5 }); break;
         case 'stop': this.hitstopMs = Math.max(this.hitstopMs, ev[1]); break;
         case 'down': {

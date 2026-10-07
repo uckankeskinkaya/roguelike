@@ -22,6 +22,7 @@ export class Input {
     this.onDevice = null;    // (device) => void
     this.onNav = null;       // ('up'|'down'|'left'|'right'|'ok'|'back') => void
     this.onPause = null;
+    this.onMap = null;       // toggles the full map
     this.gp = { index: -1, prev: [], navT: 0, lastAxis: '' };
     this.touch = { left: null, right: null, dash: null };
     this.gpMove = [0, 0];
@@ -36,6 +37,7 @@ export class Input {
       if (!this.keys.has(e.code)) {
         if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashLatch = true;
         if (e.code === 'Escape' || e.code === 'KeyP') this.onPause?.();
+        if (e.code === 'KeyM' || e.code === 'Tab') this.onMap?.();
       }
       this.keys.add(e.code);
     });
@@ -130,6 +132,7 @@ export class Input {
     this.gpAim = aim;
     if (edge(0) || edge(4) || edge(5) || edge(6) || edge(7)) this.dashLatch = true;
     if (edge(9)) this.onPause?.();
+    if (edge(8) || edge(3)) this.onMap?.();
 
     // menu navigation (d-pad / left stick with repeat)
     if (this.onNav) {

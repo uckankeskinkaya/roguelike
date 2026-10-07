@@ -1,7 +1,7 @@
 // Procedural map: obstacles, floor zones and points of interest (structures,
 // guardian bosses). Generated purely from the run seed, so the host and every
 // client build the identical map without sending it over the network.
-import { ARENA_W, ARENA_H } from '../config.js';
+import { ARENA_W, ARENA_H, EXPLORE_CELL, EXPLORE_W, EXPLORE_H } from '../config.js';
 import { RNG } from '../rng.js';
 
 // Structure types. Index order is part of the network protocol.
@@ -93,7 +93,7 @@ export function genMap(seedNum) {
 
   const place = (type, count, minCenter, minGap, extra = {}) => {
     for (let n = 0; n < count; n++) {
-      for (let tries = 0; tries < 400; tries++) {
+      for (let tries = 0; tries < 1500; tries++) {
         const p = { type, x: rng.range(M, ARENA_W - M), y: rng.range(M, ARENA_H - M), tier: 0, guard: -1, ...extra };
         if (Math.hypot(p.x - cx, p.y - cy) < minCenter) continue;
         if (pois.some((q) => dist(p, q) < minGap)) continue;
@@ -103,13 +103,13 @@ export function genMap(seedNum) {
     }
   };
   // gold chests first: each is locked behind a sleeping guardian boss
-  const goldMinCenter = 950;
-  for (let g = 0; g < 3; g++) place('chest', 1, goldMinCenter, 900, { tier: 1, guard: g });
-  place('shrine', 3, 500, 560);
-  place('pylon', 2, 600, 700);
-  place('fountain', 3, 380, 520);
-  place('totem', 3, 450, 520);
-  place('chest', 6, 350, 380);
+  const goldMinCenter = 1500;
+  for (let g = 0; g < 4; g++) place('chest', 1, goldMinCenter, 1500, { tier: 1, guard: g });
+  place('shrine', 5, 700, 900);
+  place('pylon', 3, 900, 1200);
+  place('fountain', 5, 500, 700);
+  place('totem', 4, 600, 750);
+  place('chest', 10, 450, 560);
 
   const obstacles = [];
   const clearOf = (x, y, r) => {
@@ -129,7 +129,7 @@ export function genMap(seedNum) {
   };
 
   // ruin clusters: overlapping circles read as walls and give cover
-  for (let c = 0; c < 10; c++) {
+  for (let c = 0; c < 26; c++) {
     let bx = 0, by = 0;
     for (let tries = 0; tries < 60; tries++) {
       bx = rng.range(M, ARENA_W - M); by = rng.range(M, ARENA_H - M);
@@ -149,11 +149,59 @@ export function genMap(seedNum) {
       }
     }
   }
-  for (let i = 0; i < 30; i++) add(rng.range(M, ARENA_W - M), rng.range(M, ARENA_H - M), rng.range(24, 56));
+  for (let i = 0; i < 90; i++) add(rng.range(M, ARENA_W - M), rng.range(M, ARENA_H - M), rng.range(24, 56));
 
   const zones = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 14; i++) {
     zones.push({ x: rng.range(0, ARENA_W), y: rng.range(0, ARENA_H), r: rng.range(480, 900), color: rng.pick(ZONE_COLORS) });
   }
   return new MapData({ obstacles, pois, zones });
+}
+
+// ------------------------------------------------------------ fog of war
+// `explored` is a flat Uint8Array (EXPLORE_W x EXPLORE_H, 1 = revealed).
+export function revealCells(explored, x, y, R) {
+  const cx0 = Math.max(0, Math.floor((x - R) / EXPLORE_CELL)), cx1 = Math.min(EXPLORE_W - 1, Math.floor((x + R) / EXPLORE_CELL));
+  const cy0 = Math.max(0, Math.floor((y - R) / EXPLORE_CELL)), cy1 = Math.min(EXPLORE_H - 1, Math.floor((y + R) / EXPLORE_CELL));
+  let n = 0;
+  for (let cy = cy0; cy <= cy1; cy++) {
+    for (let cx = cx0; cx <= cx1; cx++) {
+      const dx = (cx + 0.5) * EXPLORE_CELL - x, dy = (cy + 0.5) * EXPLORE_CELL - y;
+      if (dx * dx + dy * dy > R * R) continue;
+      const i = cy * EXPLORE_W + cx;
+      if (!explored[i]) { explored[i] = 1; n++; }
+    }
+  }
+  return n;
+}
+
+export function isExplored(explored, x, y) {
+  const cx = Math.floor(x / EXPLORE_CELL), cy = Math.floor(y / EXPLORE_CELL);
+  if (cx < 0 || cy < 0 || cx >= EXPLORE_W || cy >= EXPLORE_H) return false;
+  return explored[cy * EXPLORE_W + cx] === 1;
+}
+
+// bit-packed + base64 for the network (a few hundred bytes)
+export function packExplored(explored) {
+  const bytes = new Uint8Array(Math.ceil(explored.length / 8));
+  for (let i = 0; i < explored.length; i++) if (explored[i]) bytes[i >> 3] |= 1 << (i & 7);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+// ORs a packed mask into `explored`; returns how many cells were newly revealed
+export function mergeExplored(explored, b64) {
+  const bin = atob(b64);
+  let n = 0;
+  for (let i = 0; i < explored.length; i++) {
+    if (!explored[i] && (bin.charCodeAt(i >> 3) >> (i & 7)) & 1) { explored[i] = 1; n++; }
+  }
+  return n;
+}
+
+export function exploredFraction(explored) {
+  let n = 0;
+  for (let i = 0; i < explored.length; i++) n += explored[i];
+  return n / explored.length;
 }

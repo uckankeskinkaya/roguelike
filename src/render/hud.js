@@ -4,7 +4,7 @@ import { TIER_NAMES } from '../sim/weapons.js';
 import { ENEMIES } from '../sim/enemies.js';
 import { drawWeapon } from './icons.js';
 import { dashCooldownTicks } from '../sim/player.js';
-import { drawMinimap } from './mapart.js';
+import { drawMinimap, drawWorldMap } from './mapart.js';
 import { GUARDIAN_COLORS } from '../sim/map.js';
 
 function bar(ctx, x, y, w, h, frac, col, bg = 'rgba(0,0,0,0.55)') {
@@ -126,8 +126,7 @@ export function drawHUD(r, view, localPid, info) {
   if (view.phase === 'wave') {
     title = `DALGA ${view.wave} / ${FINAL_WAVE}`;
     if (view.waveTicks > 0) sub = `${view.waveTicks}`;
-  } else if (view.phase === 'pick') title = view.wave === 0 ? 'SİLAHINI SEÇ' : 'GÜÇLENDİRME';
-  else if (view.phase === 'countdown') title = `DALGA ${view.wave + 1} / ${FINAL_WAVE}`;
+  } else if (view.phase === 'countdown') title = `DALGA ${view.wave + 1} / ${FINAL_WAVE}`;
   ctx.font = `800 ${14 * S}px system-ui, sans-serif`;
   ctx.fillStyle = '#c9d6ff';
   ctx.fillText(title, cx, pad + 12);
@@ -221,5 +220,6 @@ export function drawHUD(r, view, localPid, info) {
     ctx.fillStyle = 'rgba(200,214,255,0.6)';
     ctx.fillText(info.hint, cx, h - 14);
   }
+  if (info.mapOpen) drawWorldMap(r, view, localPid, r.time);
   ctx.textAlign = 'left';
 }

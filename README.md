@@ -100,19 +100,22 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
 ## Oyun
 
 - **Döngü:** 30 dalga, süre yok: bir dalga, tüm düşmanları temizlenince biter (zorluk yavaş ve
-  geç yükselir). Her dalga sonunda güçlendirme kartı seçersin. Her 5. dalga
+  geç yükselir, ilk dalgalar da artık dişli). **Seçimler anında olur:** seviye atlayınca ya da bir yapı ödül verince
+  3 kart çıkar ve simülasyon tamamen durur (düşmanlar, mermiler, her şey). Co-op'ta herkes seçene kadar
+  oyun durur, 30 sn sonra otomatik seçilir. Her 5. dalga
   **Kor Gözcü** boss'u (spiral, halka, hücum, nişanlı yelpaze ve çağırma desenleri; %50 canın
   altında öfkeli ikinci evre). Ölüm = baştan. Her koşu bir **tohuma** bağlı. Aynı tohum aynı
   silah tekliflerini ve düşman dizilimini üretir (tek oyunculu).
-- **Harita:** 3600×2400'lük açık bir alan, tohumdan üretilir (host ve istemciler aynı haritayı
+- **Harita:** 6400×4200'lük açık bir alan, tohumdan üretilir (host ve istemciler aynı haritayı
   kendileri kurar, ağdan harita gitmez). Kayalar, sütunlar ve kristaller yolu keser ve düşman
-  mermilerini durdurur (siper). Köşede minimap var. Düşmanlar takımın etrafında, ekran dışında doğar.
+  mermilerini durdurur (siper). **Keşif sisi:** yalnızca gezdiğin yerler haritada görünür (co-op'ta ortak).
+  Köşedeki minimap çevreni gösterir, **M / Tab / Select / 🗺** tüm haritayı açar. Düşmanlar takımın etrafında, ekran dışında doğar.
 - **Yapılar** (üstünde durarak etkinleşir, düğme yok: klavye/gamepad/dokunmatikte aynı):
-  Sandık (anında 1 yükseltme), Altın Sandık (2 yükseltme, Muhafız'ın arkasında kilitli),
-  Şifa Pınarı (takımı iyileştirir, düşenleri kaldırır), Kan Sunağı (pusu, yenince herkese 2 yükseltme),
+  Sandık (3 karttan seç), Altın Sandık (2 seçim, Muhafız'ın arkasında kilitli),
+  Şifa Pınarı (takımı iyileştirir, düşenleri kaldırır), Kan Sunağı (pusu, yenince herkese 2 seçim),
   Enerji Kulesi (alanda şarj ol, XP yağmuru), Savaş Totemi (45 sn hasar/atış hızı).
 - **Haritada bosslar:** 3 uyuyan **Muhafız** (4 farklı saldırı seti). Yaklaşınca ya da vurulunca
-  uyanırlar, herkes uzaklaşırsa geri uyuyup iyileşirler. Öldürünce herkese 2 yükseltme, kalpler ve altın
+  uyanırlar, herkes uzaklaşırsa geri uyuyup iyileşirler. Öldürünce herkese 2 seçim, kalpler ve altın
   sandığın kilidi. Dalga bitişini beklemezler: isteğe bağlıdırlar.
 - **Silahlar (9):** Kıvılcım, Saçma, İğne Yağmuru, Ray Topu (anlık delici ışın), Roketatar
   (alan hasarı), Ay Bıçağı (geri dönen), Şimşek (zincirleme), Ejder Nefesi (tutuşturan alev),

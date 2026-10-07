@@ -266,3 +266,5 @@ button:disabled { opacity: 0.4; pointer-events: none; }
   #pick-sub { margin-bottom: 8px; }
   button.big { padding: 10px 14px; font-size: 15px; }
 }
+
+#btn-map { right: calc(68px + var(--safe-right)); font-size: 16px; }

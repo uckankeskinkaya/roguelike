@@ -1,7 +1,7 @@
 // Drawing for the open map: floor zones, obstacles, structures (POIs),
 // guardian bosses and the minimap. Everything is vector/procedural.
-import { ARENA_W, ARENA_H, PLAYER_COLORS } from '../config.js';
-import { POI_DEFS, GUARDIAN_COLORS, GOLD_COLOR, poiName } from '../sim/map.js';
+import { ARENA_W, ARENA_H, PLAYER_COLORS, EXPLORE_W, EXPLORE_H } from '../config.js';
+import { POI_DEFS, GUARDIAN_COLORS, GOLD_COLOR, poiName, isExplored, exploredFraction } from '../sim/map.js';
 import { glow, withAlpha } from './sprites.js';
 
 const TAU = Math.PI * 2;
@@ -240,71 +240,151 @@ export function drawGuardian(ctx, e, time, flash, me, p) {
   ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.05, r * 0.17, 0, 0, TAU); ctx.fill();
 }
 
-// ----------------------------------------------------------------- minimap
-const staticCache = new WeakMap();
-const MW = 220, MH = Math.round((220 * ARENA_H) / ARENA_W);
+// ------------------------------------------------- fog of war, minimap, map
+const FS = 0.15; // pixels of the cached map layer per world pixel
+const FW = Math.round(ARENA_W * FS), FH = Math.round(ARENA_H * FS);
+const layerCache = new WeakMap();
 
-function staticLayer(map) {
-  let c = staticCache.get(map);
+// Terrain layer of the whole map (zones + obstacles), built once per map
+function terrainLayer(map) {
+  let c = layerCache.get(map);
   if (c) return c;
   c = document.createElement('canvas');
-  c.width = MW; c.height = MH;
+  c.width = FW; c.height = FH;
   const g = c.getContext('2d');
-  const sx = MW / ARENA_W, sy = MH / ARENA_H;
-  g.fillStyle = '#080b16'; g.fillRect(0, 0, MW, MH);
-  g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.3;
-  for (const z of map.zones) g.drawImage(glow(z.color, 64), (z.x - z.r) * sx, (z.y - z.r) * sy, z.r * 2 * sx, z.r * 2 * sy);
+  g.fillStyle = '#0a0e1b'; g.fillRect(0, 0, FW, FH);
+  g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.35;
+  for (const z of map.zones) g.drawImage(glow(z.color, 64), (z.x - z.r) * FS, (z.y - z.r) * FS, z.r * 2 * FS, z.r * 2 * FS);
   g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
-  g.fillStyle = 'rgba(120,140,200,0.45)';
-  for (const b of map.obstacles) { g.beginPath(); g.arc(b.x * sx, b.y * sy, Math.max(1, b.r * sx), 0, TAU); g.fill(); }
-  staticCache.set(map, c);
+  g.fillStyle = 'rgba(130,150,215,0.5)';
+  for (const b of map.obstacles) { g.beginPath(); g.arc(b.x * FS, b.y * FS, Math.max(1.2, b.r * FS), 0, TAU); g.fill(); }
+  layerCache.set(map, c);
   return c;
 }
 
-export function drawMinimap(r, view, localPid, x, y, width, time) {
-  const { ctx } = r;
-  if (!view.map) return;
-  const height = (width * ARENA_H) / ARENA_W;
-  const sx = width / ARENA_W, sy = height / ARENA_H;
-  ctx.save();
-  ctx.globalAlpha = 0.82;
-  ctx.drawImage(staticLayer(view.map), x, y, width, height);
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = 'rgba(140,160,255,0.45)'; ctx.lineWidth = 1.5;
-  ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
-  ctx.beginPath(); ctx.rect(x, y, width, height); ctx.clip();
+// Terrain masked by the explored area; rebuilt only when new cells get revealed
+const foggedCache = new WeakMap();
+function foggedLayer(view) {
+  let f = foggedCache.get(view.map);
+  if (!f) {
+    f = { c: document.createElement('canvas'), mask: document.createElement('canvas'), ver: -1 };
+    f.c.width = FW; f.c.height = FH;
+    f.mask.width = EXPLORE_W; f.mask.height = EXPLORE_H;
+    foggedCache.set(view.map, f);
+  }
+  if (f.ver !== view.exploredVer) {
+    f.ver = view.exploredVer;
+    const m = f.mask.getContext('2d');
+    const img = m.createImageData(EXPLORE_W, EXPLORE_H);
+    const ex = view.explored;
+    for (let i = 0; i < ex.length; i++) { img.data[i * 4] = 255; img.data[i * 4 + 1] = 255; img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = ex[i] ? 255 : 0; }
+    m.putImageData(img, 0, 0);
+    const g = f.c.getContext('2d');
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, FW, FH);
+    g.drawImage(terrainLayer(view.map), 0, 0);
+    g.globalCompositeOperation = 'destination-in';
+    g.imageSmoothingEnabled = true;
+    g.drawImage(f.mask, 0, 0, FW, FH); // bilinear upscale = soft fog edge
+    g.globalCompositeOperation = 'source-over';
+  }
+  return f.c;
+}
 
+function marker(ctx, poi, px, py, k) {
+  ctx.fillStyle = poi.state === 2 ? 'rgba(130,140,170,0.55)' : poiColor(poi);
+  const u = 3.4 * k;
+  if (poi.type === 'chest') ctx.fillRect(px - u, py - u * 0.8, u * 2, u * 1.6);
+  else if (poi.type === 'shrine') { ctx.beginPath(); ctx.moveTo(px, py - u * 1.4); ctx.lineTo(px + u * 1.1, py + u); ctx.lineTo(px - u * 1.1, py + u); ctx.fill(); }
+  else if (poi.type === 'pylon') { ctx.beginPath(); ctx.moveTo(px, py - u * 1.4); ctx.lineTo(px + u * 1.1, py); ctx.lineTo(px, py + u * 1.4); ctx.lineTo(px - u * 1.1, py); ctx.fill(); }
+  else { ctx.beginPath(); ctx.arc(px, py, u, 0, TAU); ctx.fill(); }
+  if (poi.locked) { ctx.strokeStyle = '#ff3355'; ctx.lineWidth = 1.5 * k; ctx.strokeRect(px - u * 1.5, py - u * 1.5, u * 3, u * 3); }
+}
+
+// Draws terrain + discovered markers into a rectangle. `win` = visible world
+// window {x0, y0, w}: scale = rect width / win.w.
+function paintMap(r, view, localPid, x, y, width, height, win, k, time) {
+  const { ctx } = r;
+  const sc = width / win.w;
+  ctx.fillStyle = 'rgba(4,6,14,0.82)';
+  ctx.fillRect(x, y, width, height);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, y, width, height); ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(foggedLayer(view), x - win.x0 * sc, y - win.y0 * sc, ARENA_W * sc, ARENA_H * sc);
+  const X = (wx) => x + (wx - win.x0) * sc, Y = (wy) => y + (wy - win.y0) * sc;
   for (const poi of view.pois || []) {
-    const px = x + poi.x * sx, py = y + poi.y * sy;
-    ctx.fillStyle = poi.state === 2 ? 'rgba(130,140,170,0.5)' : poiColor(poi);
-    if (poi.type === 'chest') ctx.fillRect(px - 3, py - 2.5, 6, 5);
-    else if (poi.type === 'shrine') { ctx.beginPath(); ctx.moveTo(px, py - 4.5); ctx.lineTo(px + 3.5, py + 3); ctx.lineTo(px - 3.5, py + 3); ctx.fill(); }
-    else if (poi.type === 'pylon') { ctx.beginPath(); ctx.moveTo(px, py - 4.5); ctx.lineTo(px + 3.5, py); ctx.lineTo(px, py + 4.5); ctx.lineTo(px - 3.5, py); ctx.fill(); }
-    else { ctx.beginPath(); ctx.arc(px, py, 3.2, 0, TAU); ctx.fill(); }
-    if (poi.locked) { ctx.strokeStyle = '#ff3355'; ctx.lineWidth = 1.5; ctx.strokeRect(px - 5, py - 5, 10, 10); }
+    if (!isExplored(view.explored, poi.x, poi.y)) continue;
+    marker(ctx, poi, X(poi.x), Y(poi.y), k);
   }
   for (const e of view.enemies) {
     if (!e.guardian && !e.boss) continue;
-    const px = x + e.x * sx, py = y + e.y * sy;
-    const col = e.boss ? '#ff3355' : GUARDIAN_COLORS[e.v || 0];
-    ctx.fillStyle = col;
-    const s = e.boss ? 5 + Math.sin(time * 8) : e.asleep ? 3.2 : 4.5;
-    ctx.globalAlpha = e.asleep ? 0.55 : 1;
-    ctx.beginPath(); ctx.arc(px, py, s, 0, TAU); ctx.fill();
-    ctx.globalAlpha = 1;
+    if (!e.boss && !isExplored(view.explored, e.x, e.y)) continue;
+    ctx.globalAlpha = e.asleep ? 0.6 : 1;
+    ctx.fillStyle = e.boss ? '#ff3355' : GUARDIAN_COLORS[e.v || 0];
+    const sz = (e.boss ? 5.5 + Math.sin(time * 8) : e.asleep ? 3.6 : 4.8) * k;
+    ctx.beginPath(); ctx.arc(X(e.x), Y(e.y), sz, 0, TAU); ctx.fill();
     ctx.strokeStyle = '#05060c'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.globalAlpha = 1;
   }
   for (const p of view.players) {
-    const px = x + p.x * sx, py = y + p.y * sy;
     ctx.fillStyle = p.downed ? '#777' : PLAYER_COLORS[p.pid % PLAYER_COLORS.length];
-    ctx.beginPath(); ctx.arc(px, py, p.pid === localPid ? 3.2 : 2.5, 0, TAU); ctx.fill();
-    if (p.pid === localPid) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), (p.pid === localPid ? 3.6 : 2.8) * k, 0, TAU); ctx.fill();
+    if (p.pid === localPid) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * k; ctx.stroke(); }
   }
   // camera viewport
   const z = r.cam.zoom;
-  const vw = r.w / z, vh = r.h / z;
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
-  ctx.strokeRect(x + (r.cam.x - vw / 2) * sx, y + (r.cam.y - vh / 2) * sy, vw * sx, vh * sy);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
+  ctx.strokeRect(X(r.cam.x - r.w / z / 2), Y(r.cam.y - r.h / z / 2), (r.w / z) * sc, (r.h / z) * sc);
   ctx.restore();
+  ctx.strokeStyle = 'rgba(140,160,255,0.5)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+}
+
+// Small corner minimap: a window around the local player
+const MINI_SPAN = 2200;
+export function drawMinimap(r, view, localPid, x, y, width, time) {
+  if (!view.map || !view.explored) return 0;
+  const height = Math.round(width * 0.72);
+  const me = view.players.find((p) => p.pid === localPid) || view.players[0];
+  const cx = me ? me.x : ARENA_W / 2, cy = me ? me.y : ARENA_H / 2;
+  const spanH = MINI_SPAN * (height / width);
+  paintMap(r, view, localPid, x, y, width, height, { x0: cx - MINI_SPAN / 2, y0: cy - spanH / 2, w: MINI_SPAN }, 1, time);
   return height;
+}
+
+// Full-screen map (toggle with M / Select / the map button)
+export function drawWorldMap(r, view, localPid, time) {
+  if (!view.map || !view.explored) return;
+  const { ctx, w, h } = r;
+  ctx.fillStyle = 'rgba(2,3,8,0.9)';
+  ctx.fillRect(0, 0, w, h);
+  const pad = Math.min(60, w * 0.05);
+  const topH = 54, botH = 46;
+  const availW = w - pad * 2, availH = h - topH - botH - pad;
+  const k = Math.min(availW / ARENA_W, availH / ARENA_H);
+  const mw = ARENA_W * k, mh = ARENA_H * k;
+  const mx = (w - mw) / 2, my = topH + (availH - mh) / 2 + 6;
+  paintMap(r, view, localPid, mx, my, mw, mh, { x0: 0, y0: 0, w: ARENA_W }, Math.max(1, mw / 700) * 1.5, time);
+  ctx.textAlign = 'center';
+  ctx.font = '900 22px system-ui, sans-serif';
+  ctx.fillStyle = '#c9d6ff';
+  ctx.fillText('HARİTA', w / 2, 34);
+  const pct = Math.round(exploredFraction(view.explored) * 100);
+  ctx.font = '600 13px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(200,214,255,0.65)';
+  ctx.fillText(`Keşfedilen: %${pct}  ·  kapatmak için M / Esc / harita düğmesi`, w / 2, my + mh + 26);
+  // legend
+  const items = [['chest', 'Sandık'], ['shrine', 'Sunak'], ['pylon', 'Kule'], ['fountain', 'Pınar'], ['totem', 'Totem']];
+  ctx.textAlign = 'left';
+  ctx.font = '600 12px system-ui, sans-serif';
+  let lx = mx;
+  for (const [type, label] of items) {
+    marker(ctx, { type, state: 0, tier: 0 }, lx + 6, my - 14, 1.3);
+    ctx.fillStyle = '#dfe8ff';
+    ctx.fillText(label, lx + 16, my - 10);
+    lx += 16 + ctx.measureText(label).width + 16;
+  }
+  ctx.fillStyle = GUARDIAN_COLORS[0]; ctx.beginPath(); ctx.arc(lx + 5, my - 14, 4.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#dfe8ff'; ctx.fillText('Muhafız', lx + 16, my - 10);
 }

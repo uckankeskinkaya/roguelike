@@ -137,10 +137,12 @@ export class UI {
   }
 
   // ------------------------------------------------------------ cards
+  // Level-ups, chests and the starter weapon all use the same overlay. The game is
+  // frozen (by the simulation) while anybody has a pick pending.
   updatePick(view, me, onPick) {
     const pick = $('scr-pick');
     const wait = $('pick-wait');
-    if (!view || view.phase !== 'pick' || !me) {
+    if (!view || !me) {
       if (!pick.hidden) { pick.hidden = true; this.cardSig = ''; }
       wait.hidden = true;
       return false;
@@ -150,7 +152,10 @@ export class UI {
       if (!pick.hidden) { pick.hidden = true; this.cardSig = ''; }
       const others = view.players.filter((p) => p.connected && p.picks > 0).map((p) => p.name);
       wait.hidden = others.length === 0;
-      if (others.length) wait.textContent = `Seçim yapanlar: ${others.join(', ')}  ·  ${Math.ceil((view.pickTimer || 0) / 60)} sn`;
+      if (others.length) {
+        const t = Math.ceil((view.pickTimer || 0) / 60);
+        wait.textContent = `Oyun durdu · seçim yapanlar: ${others.join(', ')}${t > 0 && t < 100 ? `  ·  ${t} sn` : ''}`;
+      }
       return false;
     }
     wait.hidden = true;
@@ -161,14 +166,14 @@ export class UI {
     }
     pick.hidden = false;
     const t = Math.ceil((view.pickTimer || 0) / 60);
-    $('pick-sub').textContent = (view.wave === 0
+    $('pick-sub').textContent = (me.weapons.length === 0
       ? 'Başlangıç silahını seç'
-      : `${me.picks} seçim hakkın var`) + (t > 0 && t < 30 ? ` · ${t} sn` : '');
+      : `Oyun durdu · ${me.picks} seçim hakkın var`) + (t > 0 && t < 100 ? ` · ${t} sn` : '');
     return true;
   }
 
   buildCards(view, me, onPick) {
-    $('pick-title').textContent = view.wave === 0 ? 'SİLAHINI SEÇ' : 'GÜÇLENDİRME SEÇ';
+    $('pick-title').textContent = me.weapons.length === 0 ? 'SİLAHINI SEÇ' : 'GÜÇLENDİRME SEÇ';
     const box = $('cards');
     box.innerHTML = '';
     me.choices.forEach((c, i) => {

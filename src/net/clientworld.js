@@ -2,7 +2,8 @@
 // everything, plus client-side prediction + reconciliation for the local player.
 import { TICK_MS, INTERP_TICKS } from '../config.js';
 import { stepMovement, dashCooldownTicks } from '../sim/player.js';
-import { genMap } from '../sim/map.js';
+import { genMap, revealCells, mergeExplored } from '../sim/map.js';
+import { EXPLORE_W, EXPLORE_H, EXPLORE_R } from '../config.js';
 import { hashSeed } from '../rng.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -22,6 +23,8 @@ export class ClientWorld {
     this.errX = 0; this.errY = 0;
     this.lastSnapAt = 0;
     this.map = null;         // built from the run seed on the first snapshot
+    this.explored = new Uint8Array(EXPLORE_W * EXPLORE_H);
+    this.exploredVer = 1;
   }
 
   latest() { return this.snaps[this.snaps.length - 1]; }
@@ -30,6 +33,11 @@ export class ClientWorld {
     const last = this.latest();
     if (last && s.tick <= last.tick) return [];
     if (!this.map && s.meta.seed) this.map = genMap(hashSeed(s.meta.seed));
+    // fog of war: reveal around every player locally, and merge the host's full mask now and then
+    let rev = 0;
+    for (const p of s.players) if (p.connected) rev += revealCells(this.explored, p.x, p.y, EXPLORE_R);
+    if (s.meta.ex) rev += mergeExplored(this.explored, s.meta.ex);
+    if (rev) this.exploredVer++;
     if (s.meta.b) {
       this.builds.clear();
       for (const b of s.meta.b) this.builds.set(b.pid, b);
@@ -66,7 +74,7 @@ export class ClientWorld {
     const pred = {};
     for (const k of MOVE_KEYS) pred[k] = me[k];
     pred.aimX = me.aimX; pred.aimY = me.aimY;
-    if (s.meta.ph !== 'gameover' && s.meta.ph !== 'victory') {
+    if (s.meta.ph !== 'gameover' && s.meta.ph !== 'victory' && !s.meta.fz) {
       for (const h of this.history) this.applyInput(pred, h.input, b);
     }
     if (before) {
@@ -89,7 +97,7 @@ export class ClientWorld {
     const b = this.builds.get(this.localPid);
     const s = this.latest();
     let dashed = 0;
-    if (this.pred && b && s && s.meta.ph !== 'gameover' && s.meta.ph !== 'victory') {
+    if (this.pred && b && s && s.meta.ph !== 'gameover' && s.meta.ph !== 'victory' && !s.meta.fz) {
       this.prevPred = { x: this.pred.x, y: this.pred.y };
       const inp = { mx: msg.mx, my: msg.my, ax: msg.ax, ay: msg.ay, dash: !!msg.d };
       dashed = this.applyInput(this.pred, inp, b);
@@ -172,6 +180,7 @@ export class ClientWorld {
       teles: b.teles,
       pois: latest.pois,
       map: this.map,
+      explored: this.explored, exploredVer: this.exploredVer, frozen: !!m.fz,
     };
   }
 }

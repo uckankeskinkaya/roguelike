@@ -50,6 +50,7 @@ const G = {
   overAt: 0,
   overShown: false,
   view: null,
+  mapOpen: false,
 };
 
 // --------------------------------------------------------------- helpers
@@ -73,6 +74,13 @@ function resetPresentation() {
 function setPlaying(on) {
   document.body.classList.toggle('playing', on);
   $('btn-pause').hidden = !on;
+  $('btn-map').hidden = !on;
+  if (!on) G.mapOpen = false;
+}
+
+function toggleMap() {
+  if (!inGame() || ui.current) return;
+  G.mapOpen = !G.mapOpen;
 }
 
 function localPlayerPos() {
@@ -382,6 +390,7 @@ function frame(now) {
 
   const pickVisible = !$('scr-pick').hidden;
   $('btn-pause').hidden = !inGame() || !!ui.current;
+  $('btn-map').hidden = $('btn-pause').hidden;
   fx.solo = G.mode === 'single';
   input.enabled = !ui.current && !pickVisible;
   if (!input.enabled) input.dashLatch = false; // e.g. the A press that picked a card
@@ -435,7 +444,7 @@ function frame(now) {
         : input.device === 'touch' ? ''
           : 'WASD: hareket · Fare: nişan · Boşluk: atıl · Haritadaki yapıların üstünde dur · Esc: menü';
     }
-    drawHUD(renderer, view, G.localPid, { netText, hint, hideBanner: !$('scr-pick').hidden });
+    drawHUD(renderer, view, G.localPid, { netText, hint, hideBanner: !$('scr-pick').hidden, mapOpen: G.mapOpen && $('scr-pick').hidden && !ui.current });
     input.drawTouch(renderer.ctx);
     if (input.device === 'kbm' && input.enabled) drawCrosshair();
 
@@ -539,10 +548,13 @@ addEventListener('keydown', (e) => {
 });
 
 input.onPause = () => {
+  if (G.mapOpen) { G.mapOpen = false; return; }
   if (['scr-settings', 'scr-help', 'scr-join'].includes(ui.current)) ui.back();
   else togglePause();
 };
 input.onNav = (dir) => { if (ui.current || !$('scr-pick').hidden) ui.nav(dir); };
+input.onMap = () => toggleMap();
+$('btn-map').addEventListener('click', () => toggleMap());
 input.onDevice = (d) => { document.body.dataset.device = d; fx.deviceScale = d === 'touch' ? 0.3 : d === 'gamepad' ? 0.7 : 1; };
 
 // audio needs a user gesture

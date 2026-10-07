@@ -36,10 +36,10 @@ function trimEvents(events) {
 export function encodeSnapshot(sim, events, includeBuilds) {
   const meta = {
     ph: sim.phase, w: sim.wave, wt: sim.waveTicks, wl: sim.waveLen || 0, cd: sim.countdown, pt: sim.pickTimer,
-    lv: sim.level, xp: sim.xp, xn: sim.xpNext, boss: sim.bossId, kills: sim.kills, seed: sim.seedStr,
+    lv: sim.level, xp: sim.xp, xn: sim.xpNext, boss: sim.bossId, fz: sim.frozen ? 1 : 0, kills: sim.kills, seed: sim.seedStr,
     ev: trimEvents(events),
   };
-  if (includeBuilds) meta.b = sim.players.map(buildInfo);
+  if (includeBuilds) { meta.b = sim.players.map(buildInfo); meta.ex = sim.exploredPacked(); }
   const metaBytes = enc.encode(JSON.stringify(meta));
   const P = sim.players, E = sim.enemies, B = sim.bullets, EB = sim.ebullets, K = sim.pickups, T = sim.teles, O = sim.pois;
   const size = 22 + O.length * POI_BYTES + P.length * P_BYTES + E.length * E_BYTES + B.length * B_BYTES + EB.length * EB_BYTES
