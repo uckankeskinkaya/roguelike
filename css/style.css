@@ -268,3 +268,7 @@ button:disabled { opacity: 0.4; pointer-events: none; }
 }
 
 #btn-map { right: calc(68px + var(--safe-right)); font-size: 16px; }
+
+.note { white-space: pre-line; }
+.note.warn { color: var(--gold); font-weight: 700; }
+.small-note { font-size: 12px; opacity: 0.8; margin-top: 4px; }

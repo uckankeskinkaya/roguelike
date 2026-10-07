@@ -27,6 +27,26 @@ export function loadPeerJS() {
 
 const PEER_OPTS = { debug: 1 };
 
+// ICE servers: several STUN servers (direct connections through most NATs) plus
+// TURN relays as a fallback for strict networks (mobile data, offices, CGNAT).
+// Add your own relay with  ?turn=turn:host:3478|user|pass  (kept in this browser).
+const DEFAULT_ICE = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+];
+let customTurn = null;
+export function setTurn(str) {
+  customTurn = null;
+  if (!str) return;
+  const [url, username, credential] = str.split('|');
+  if (url) customTurn = { urls: [url], ...(username ? { username, credential } : {}) };
+}
+function iceConfig() {
+  return { iceServers: customTurn ? [customTurn, ...DEFAULT_ICE] : DEFAULT_ICE, iceCandidatePoolSize: 2 };
+}
+function peerOptions() { return { ...PEER_OPTS, config: iceConfig() }; }
+
 // Optional self-hosted PeerJS signaling server, e.g. "wss://signal.example.com:443/"
 // or "127.0.0.1:9000/". Without it PeerJS's free public broker is used.
 export function setSignaling(str) {
@@ -96,13 +116,15 @@ export class HostSession {
 
   tryOpen(code) {
     return new Promise((resolve, reject) => {
-      const peer = new window.Peer(PEER_PREFIX + code, PEER_OPTS);
+      const peer = new window.Peer(PEER_PREFIX + code, peerOptions());
       let opened = false;
-      peer.on('open', () => { opened = true; this.peer = peer; resolve(); });
+      peer.on('open', () => { opened = true; this.peer = peer; this.app.signal?.(true); resolve(); });
       peer.on('connection', (conn) => this.onConnection(conn));
       peer.on('disconnected', () => {
-        // lost the signaling server only: existing players keep playing
-        if (!this.closed && !peer.destroyed) setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 1500);
+        // lost the signaling server only: existing players keep playing, but new
+        // players cannot find the room until we are back (e.g. tab was in the background)
+        this.app.signal?.(false);
+        if (!this.closed && !peer.destroyed) setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 1000);
       });
       peer.on('error', (err) => {
         if (!opened) { peer.destroy(); reject(err); return; }
@@ -193,7 +215,15 @@ export class HostSession {
     this.broadcastLobby();
   }
 
+  // Called when the page becomes visible again: mobile browsers suspend background tabs
+  // and silently drop the signaling socket, which makes the room unreachable.
+  revive() {
+    const peer = this.peer;
+    if (peer && !peer.destroyed && peer.disconnected) { try { peer.reconnect(); } catch { /* */ } }
+  }
+
   heartbeat() {
+    this.revive();
     const now = performance.now();
     for (const rec of [...this.clients.values()]) {
       if (now - rec.lastHeard > TIMEOUT_MS) this.drop(rec, false);
@@ -300,7 +330,7 @@ export class ClientSession {
     this.cid = cid;
     this.name = name;
     await new Promise((resolve, reject) => {
-      const peer = new window.Peer(PEER_OPTS);
+      const peer = new window.Peer(peerOptions());
       this.peer = peer;
       let opened = false;
       peer.on('open', () => { opened = true; resolve(); });
@@ -308,14 +338,24 @@ export class ClientSession {
         if (!this.closed && !peer.destroyed) setTimeout(() => { if (!peer.destroyed && peer.disconnected) peer.reconnect(); }, 1000);
       });
       peer.on('error', (err) => {
-        if (!opened) { reject(new Error('Sinyal sunucusuna bağlanılamadı')); return; }
+        if (!opened) { reject(new Error(`Sinyal sunucusuna bağlanılamadı (${err.type || err.message || 'bilinmeyen'}). İnternetini / VPN / reklam engelleyicini kontrol et.`)); return; }
         if (err.type === 'peer-unavailable') {
           if (this.state === 'reconnecting') return; // keep trying until the budget runs out
-          this.fail('Oda bulunamadı: kodu kontrol et');
+          this.fatal = true;
+          this.fail('Oda bulunamadı: kodu kontrol et (host\'un oda açık mı?)');
         }
       });
     });
-    await this.openConn();
+    // up to 3 attempts: the first WebRTC handshake can take a while on slow networks / TURN
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3 && !this.closed; attempt++) {
+      this.h.progress?.(attempt === 1 ? 'Odaya bağlanılıyor…' : `Odaya bağlanılıyor… (deneme ${attempt}/3)`);
+      try { await this.openConn(); lastErr = null; break; } catch (e) {
+        lastErr = e;
+        if (this.fatal) break; // e.g. room not found: retrying is pointless
+      }
+    }
+    if (lastErr) throw lastErr;
     this.timer = setInterval(() => this.heartbeat(), HEARTBEAT_MS);
   }
 
@@ -324,13 +364,27 @@ export class ClientSession {
       const conn = this.peer.connect(PEER_PREFIX + this.code, { reliable: true, serialization: 'raw' });
       this.conn = conn;
       let done = false;
+      this.iceState = 'başlıyor';
+      // watch the WebRTC connection state once PeerJS has created it
+      const watch = setInterval(() => {
+        const pc = conn.peerConnection;
+        if (!pc) return;
+        this.iceState = pc.iceConnectionState;
+        if (!pc._nkWatched) {
+          pc._nkWatched = true;
+          pc.addEventListener('iceconnectionstatechange', () => { this.iceState = pc.iceConnectionState; this.h.progress?.(`Odaya bağlanılıyor… (ağ: ${pc.iceConnectionState})`); });
+        }
+        if (pc.iceConnectionState === 'failed' && !done) { done = true; clearInterval(watch); clearTimeout(to); try { conn.close(); } catch { /* */ } reject(new Error(this.hint())); }
+      }, 400);
       const to = setTimeout(() => {
-        if (!done) { done = true; try { conn.close(); } catch { /* */ } reject(new Error('Bağlantı zaman aşımı — oda kodu doğru mu?')); }
-      }, 12000);
+        clearInterval(watch);
+        if (!done) { done = true; try { conn.close(); } catch { /* */ } reject(new Error(this.hint())); }
+      }, 22000);
       conn.on('open', () => {
         if (done) return;
         done = true;
         clearTimeout(to);
+        clearInterval(watch);
         this.lastHeard = performance.now();
         conn.send(JSON.stringify({ t: 'hello', cid: this.cid, name: this.name, v: PROTOCOL }));
         resolve();
@@ -351,6 +405,15 @@ export class ClientSession {
       conn.on('close', () => { if (conn === this.conn) this.lost(); });
       conn.on('error', () => { if (conn === this.conn) this.lost(); });
     });
+  }
+
+  // Explains the most likely reasons for a connection that never opened
+  hint() {
+    const st = this.iceState;
+    if (st === 'failed' || st === 'disconnected') {
+      return 'Doğrudan bağlantı kurulamadı (ağ: ' + st + '). İkinizden biri kısıtlı bir ağda olabilir (mobil veri, okul/iş ağı, VPN). Aynı Wi-Fi\'ye geçmeyi dene ya da aşağıdan "Bağlantı testi"ni çalıştır.';
+    }
+    return 'Host\'a ulaşılamadı (ağ: ' + (st || '?') + '). Host sekmesi açık ve öndeyse mi? Telefonda başka uygulamaya geçince oda kapanabilir. Kodu kontrol et ya da "Bağlantı testi"ni çalıştır.';
   }
 
   heartbeat() {
@@ -394,4 +457,51 @@ export class ClientSession {
     clearInterval(this.timer);
     setTimeout(() => { try { this.peer?.destroy(); } catch { /* */ } }, 200);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Connection self-test: can we reach the signaling server, and which kinds of
+// WebRTC candidates does this network give us?
+//   host  = local addresses (works on the same Wi-Fi)
+//   srflx = public address through STUN (works across most home networks)
+//   relay = TURN relay (the fallback for strict networks)
+export async function runNetTest(report) {
+  const res = { signaling: false, signalErr: '', host: false, srflx: false, relay: false };
+  report('1/2 Sinyal sunucusuna bağlanılıyor…');
+  try {
+    await loadPeerJS();
+    await new Promise((ok, bad) => {
+      const peer = new window.Peer(peerOptions());
+      const t = setTimeout(() => { try { peer.destroy(); } catch { /* */ } bad(new Error('zaman aşımı')); }, 10000);
+      peer.on('open', () => { clearTimeout(t); try { peer.destroy(); } catch { /* */ } ok(); });
+      peer.on('error', (e) => { clearTimeout(t); try { peer.destroy(); } catch { /* */ } bad(new Error(e.type || e.message)); });
+    });
+    res.signaling = true;
+  } catch (e) { res.signalErr = e.message; }
+
+  report('2/2 Ağ adayları toplanıyor (STUN/TURN)…');
+  try {
+    const pc = new RTCPeerConnection(iceConfig());
+    pc.createDataChannel('t');
+    pc.onicecandidate = (ev) => {
+      if (!ev.candidate) return;
+      const m = /typ (host|srflx|relay)/.exec(ev.candidate.candidate);
+      if (m) res[m[1]] = true;
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((ok) => {
+      const t = setTimeout(ok, 9000);
+      pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); ok(); } };
+    });
+    pc.close();
+  } catch (e) { res.rtcErr = e.message; }
+
+  const lines = [];
+  lines.push(res.signaling ? '✔ Sinyal sunucusu: erişilebiliyor' : `✖ Sinyal sunucusu: ULAŞILAMADI (${res.signalErr}). İnterneti, VPN'i, reklam engelleyiciyi ya da DNS'i kontrol et.`);
+  lines.push(res.srflx ? '✔ Genel adres (STUN): var' : '✖ Genel adres (STUN): yok — bu ağ WebRTC için kısıtlı olabilir');
+  lines.push(res.relay ? '✔ Yedek röle (TURN): var' : '⚠ Yedek röle (TURN): yok — farklı ağdaki bazı kişilere bağlanılamayabilir');
+  if (res.signaling && (res.srflx || res.relay)) lines.push('Sonuç: bu cihaz co-op için hazır.');
+  else if (res.signaling) lines.push('Sonuç: oda kurabilirsin ama uzak oyuncular bağlanamayabilir. Aynı Wi-Fi\'de dene.');
+  else lines.push('Sonuç: co-op şu an çalışmaz. Önce sinyal sunucusuna erişimi çöz.');
+  return { res, text: lines.join('\n') };
 }

@@ -9,7 +9,7 @@ import { drawHUD } from './render/hud.js';
 import { Input } from './input/input.js';
 import { initAudio, setVolumes, music } from './audio/sfx.js';
 import { UI, $ } from './ui/ui.js';
-import { HostSession, ClientSession, setSignaling } from './net/net.js';
+import { HostSession, ClientSession, setSignaling, setTurn, runNetTest } from './net/net.js';
 import { encodeSnapshot, decodeSnapshot } from './net/protocol.js';
 import { ClientWorld } from './net/clientworld.js';
 
@@ -143,12 +143,14 @@ async function createRoom() {
       } else ui.toast(`${name} lobiden ayrıldı`);
     },
     pick: (pid, i) => { if (G.sim) G.sim.choose(pid, i); },
+    signal: (ok) => { const w = $('lobby-warn'); w.hidden = ok; w.textContent = ok ? '' : '⚠ Sinyal sunucusuyla bağlantı koptu, yeniden bağlanılıyor… (şu an yeni oyuncular odayı bulamaz)'; },
     lobbyChanged: (list) => { G.lobby = list; if (!G.sim) ui.renderLobby(list, G.code, true); },
     log: (t) => console.warn(t),
   });
   try {
     G.code = await host.open(playerName(), cid);
     G.host = host;
+    keepAwake();
     G.mode = 'host';
     G.lobby = host.lobbyList();
     ui.renderLobby(G.lobby, G.code, true);
@@ -195,6 +197,7 @@ async function joinRoom(code) {
   $('btn-join-go').disabled = true;
   const net = new ClientSession({
     message: onClientMessage,
+    progress: (t) => { if (G.net === net) $('join-msg').textContent = t; },
     snapshot: (buf) => {
       if (!G.cw) return;
       const s = decodeSnapshot(buf);
@@ -219,6 +222,7 @@ async function joinRoom(code) {
   G.code = code;
   try {
     await net.connect(code, cid, playerName());
+    keepAwake();
   } catch (e) {
     $('join-msg').textContent = e.message || 'Bağlanılamadı';
     net.close(false);
@@ -588,11 +592,37 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW kaydı başarısız', e));
 }
 
+// connection self-test buttons
+async function netTest(btn, out) {
+  btn.disabled = true;
+  try {
+    const { text } = await runNetTest((t) => { out.textContent = t; });
+    out.textContent = text;
+  } catch (e) { out.textContent = 'Test çalışmadı: ' + (e.message || e); }
+  btn.disabled = false;
+}
+$('btn-nettest-join').addEventListener('click', () => netTest($('btn-nettest-join'), $('join-msg')));
+$('btn-nettest-lobby').addEventListener('click', () => netTest($('btn-nettest-lobby'), $('lobby-note')));
+
+// keep the screen on and the room reachable while hosting / playing online
+let wakeLock = null;
+async function keepAwake() {
+  try { if (!wakeLock && navigator.wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch { /* not allowed */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (G.host) { G.host.revive(); keepAwake(); }
+  else if (G.net) keepAwake();
+});
+
 // deep link: ?oda=CODE  (+ optional &sinyal=host:port/path for a self-hosted PeerJS server)
 const params = new URLSearchParams(location.search);
 const signal = params.get('sinyal');
 if (signal !== null) store.set('signal', signal);
 setSignaling(store.get('signal', ''));
+const turn = params.get('turn');
+if (turn !== null) store.set('turn', turn);
+setTurn(store.get('turn', ''));
 const room = (params.get('oda') || params.get('room') || '').toUpperCase();
 applySettings();
 showBest();

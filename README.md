@@ -92,6 +92,12 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
   varsayılan STUN/TURN ayarları da dahil, bu sayede çoğu NAT arkasından bağlanılabiliyor.
 - Kendi sinyal sunucunu kullanmak istersen (`npx peerjs --port 9000`) linke
   `&sinyal=alanadin.com:443/` ekle. Ayar tarayıcıda saklanır ve davet linklerine otomatik eklenir.
+- **Bağlanamıyorsan:** katıl ekranındaki ve lobideki **Bağlantı testi** düğmesi sinyal sunucusuna erişimi,
+  STUN (genel adres) ve TURN (röle) adaylarını denetler ve sorunu söyler. En sık nedenler: host
+  sekmesinin telefonda arka plana düşmesi (oda kapanır, geri dönünce otomatik açılır), mobil veri/okul/iş
+  ağı/VPN gibi kısıtlı ağlar (WebRTC doğrudan bağlanamaz, TURN gerekir), reklam engelleyici. Kendi
+  röle sunucunu (ör. coturn) eklemek için linke `&turn=turn:alanadin.com:3478|kullanici|sifre` ekle; ayar tarayıcıda saklanır.
+  İstemci 3 kez dener (her biri ~22 sn) ve ağ durumunu ekranda gösterir.
 - Host oyunu simüle eder. Bağlantısı kopan oyuncunun karakteri sahnede "bağlantı yok" olarak
   bekler: aynı sekme yenilenip tekrar katılınca karakterini geri alır. Oyundan bilerek ayrılan
   oyuncu kaldırılır. Host ayrılırsa istemciler mesajla ana menüye döner. Oyun ortasında katılan
