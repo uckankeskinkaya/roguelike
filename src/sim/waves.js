@@ -24,16 +24,16 @@ export function waveQuota(w) {
 
 // enemies spawned per second (before player-count scaling): a gentle ramp
 export function spawnRate(w, boss) {
-  const r = 0.85 + w * 0.04 + w * w * 0.0024;
+  const r = 1.0 + w * 0.05 + w * w * 0.0028;
   return boss ? r * 0.4 : r;
 }
 
 export function hpScale(w, players) {
-  return (1.4 + 0.16 * (w - 1) + 0.021 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
+  return (1.7 + 0.19 * (w - 1) + 0.026 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
 }
 
 export function dmgScale(w) {
-  return 1.3 + 0.07 * (w - 1);
+  return 1.5 + 0.08 * (w - 1);
 }
 
 export function eliteChance(w) {
