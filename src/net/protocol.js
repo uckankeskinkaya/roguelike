@@ -6,7 +6,7 @@ import { WEAPONS } from '../sim/weapons.js';
 import { PLAYER_RADIUS } from '../config.js';
 
 const MSG_SNAPSHOT = 1;
-const P_BYTES = 38, E_BYTES = 12, B_BYTES = 10, EB_BYTES = 8, K_BYTES = 7, T_BYTES = 9, POI_BYTES = 10;
+const P_BYTES = 38, E_BYTES = 12, B_BYTES = 11, EB_BYTES = 8, K_BYTES = 7, T_BYTES = 9, POI_BYTES = 10;
 const MAX_EVENTS = 160;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -20,7 +20,7 @@ export function buildInfo(p) {
     pid: p.pid, name: p.name,
     w: p.weapons.map((w) => [w.id, w.tier]),
     sk: p.skills,
-    st: { maxHp: p.st.maxHp, speed: p.st.speed, dashCd: p.st.dashCd, orbitals: p.st.orbitals, pickup: p.st.pickup },
+    st: { maxHp: p.st.maxHp, speed: p.st.speed, dashCd: p.st.dashCd, orbitals: p.st.orbitals, pickup: p.st.pickup, area: p.st.area, dashLen: p.st.dashLen },
     pk: p.picks, ch: p.choices, k: p.kills, d: Math.round(p.dmg),
   };
 }
@@ -93,6 +93,7 @@ export function encodeSnapshot(sim, events, includeBuilds) {
     v.setUint8(o + 7, ang8(Math.atan2(b.vy, b.vx)));
     v.setUint8(o + 8, u8(b.r * 4));
     v.setUint8(o + 9, u8(b.t));
+    v.setUint8(o + 10, u8((b.rad || 0) / 4));
     o += B_BYTES;
   }
   for (const b of EB) {
@@ -186,7 +187,7 @@ export function decodeSnapshot(buf) {
     bullets.push({
       id: v.getUint16(o), w, kind: WEAPONS[w].kind,
       x: v.getInt16(o + 3) / 4, y: v.getInt16(o + 5) / 4,
-      vx: Math.cos(a), vy: Math.sin(a), r: v.getUint8(o + 8) / 4, t: v.getUint8(o + 9),
+      vx: Math.cos(a), vy: Math.sin(a), r: v.getUint8(o + 8) / 4, t: v.getUint8(o + 9), rad: v.getUint8(o + 10) * 4,
     });
     o += B_BYTES;
   }

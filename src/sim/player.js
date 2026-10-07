@@ -17,7 +17,7 @@ export function dashCooldownTicks(dashCdReduction) {
  * input: { mx, my, dash }
  * Returns 1 if a dash started, 2 if a dash ended, 0 otherwise.
  */
-export function stepMovement(m, input, speedMul, dashCdTicks, map = null) {
+export function stepMovement(m, input, speedMul, dashCdTicks, map = null, dashLen = 0) {
   let result = 0;
   if (m.dashCd > 0) m.dashCd--;
   let mx = input.mx || 0, my = input.my || 0;
@@ -29,7 +29,7 @@ export function stepMovement(m, input, speedMul, dashCdTicks, map = null) {
     if (len < 0.15) { dx = m.aimX; dy = m.aimY; }
     const dl = Math.hypot(dx, dy) || 1;
     m.dashDx = dx / dl; m.dashDy = dy / dl;
-    m.dashT = DASH_TICKS;
+    m.dashT = DASH_TICKS + (dashLen || 0);
     m.dashCd = dashCdTicks;
     result = 1;
   }

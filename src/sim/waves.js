@@ -16,6 +16,12 @@ export const SPAWN_TABLE = {
 export function isBossWave(w) { return BOSS_WAVES.includes(w); }
 export function isFinalWave(w) { return w >= FINAL_WAVE; }
 
+// Team scaling. Enemy health grows a bit slower than head count so a bigger team
+// is challenged without becoming a damage sponge race; enemy numbers and XP
+// requirements scale together so everybody levels at the same pace.
+export function teamHp(n) { return 1 + 0.55 * (n - 1); }
+export function teamCount(n) { return 1 + 0.4 * (n - 1); }
+
 // Waves have no timer: each one is a quota of enemies. It ends when the
 // whole quota has spawned and been killed.
 export function waveQuota(w) {
@@ -29,7 +35,7 @@ export function spawnRate(w, boss) {
 }
 
 export function hpScale(w, players) {
-  return (1.7 + 0.19 * (w - 1) + 0.026 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
+  return (1.7 + 0.19 * (w - 1) + 0.026 * (w - 1) * (w - 1)) * teamHp(players);
 }
 
 export function dmgScale(w) {
@@ -41,7 +47,7 @@ export function eliteChance(w) {
 }
 
 export function xpForLevel(lvl, players = 1) {
-  return Math.round((8 + lvl * 5 + lvl * lvl * 0.6) * (1 + 0.4 * (players - 1)));
+  return Math.round((8 + lvl * 5 + lvl * lvl * 0.6) * teamCount(players));
 }
 
 export function poolFor(w) {

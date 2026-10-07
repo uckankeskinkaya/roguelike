@@ -1,7 +1,7 @@
 // Canvas renderer. Reads a "view" (the sim state, or the interpolated network
 // view on clients) and draws it. Never mutates game state.
 import { ARENA_W, ARENA_H, PLAYER_COLORS } from '../config.js';
-import { WEAPONS } from '../sim/weapons.js';
+import { WEAPONS, auraRadius } from '../sim/weapons.js';
 import { ENEMIES } from '../sim/enemies.js';
 import { glow, withAlpha, floorTile } from './sprites.js';
 import { drawWeapon } from './icons.js';
@@ -596,6 +596,23 @@ export class Renderer {
     if (!p.connected) ctx.globalAlpha = 0.3;
     // dash afterimages
     if (p.dashT > 0 && Math.random() < 0.9) this.fx.particles.add(P.GHOST, pos.x, pos.y, 0, 0, 0.18, r, col);
+    // aura weapons (Kor Halkası): a visible ring that matches the damage radius
+    for (const wp of p.weapons || []) {
+      if (WEAPONS[wp.id].kind !== 'aura') continue;
+      const R = auraRadius(wp.id, wp.tier, p.st || {});
+      const col = WEAPONS[wp.id].color;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = withAlpha(col, 0.35 + 0.15 * Math.sin(this.time * 6));
+      ctx.lineWidth = 3;
+      ctx.setLineDash([16, 12]);
+      ctx.lineDashOffset = -this.time * 40;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, R, 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.12;
+      ctx.drawImage(glow(col, 64), pos.x - R, pos.y - R, R * 2, R * 2);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
     // light pool under the player
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha *= 0.35;
@@ -703,6 +720,35 @@ export class Renderer {
     const col = w.color;
     const a = Math.atan2(b.vy, b.vx);
     switch (b.kind) {
+      case 'mine': {
+        const armed = b.t > 18;
+        const blink = armed && Math.sin(this.time * 12 + b.id) > 0.3;
+        ctx.drawImage(glow(blink ? '#ff3355' : col, 32), p.x - 26, p.y - 26, 52, 52);
+        ctx.fillStyle = '#0f1322'; ctx.strokeStyle = blink ? '#ff3355' : col; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, TAU); ctx.fill(); ctx.stroke();
+        for (let i = 0; i < 6; i++) { const aa = (i / 6) * TAU; ctx.beginPath(); ctx.moveTo(p.x + Math.cos(aa) * 9, p.y + Math.sin(aa) * 9); ctx.lineTo(p.x + Math.cos(aa) * 14, p.y + Math.sin(aa) * 14); ctx.stroke(); }
+        break;
+      }
+      case 'meteor': {
+        const total = Math.max(1, (w.delay || 0.75) * 60);
+        const k = Math.min(1, b.t / total);
+        const R = b.rad || 100;
+        ctx.strokeStyle = withAlpha(col, 0.35 + 0.4 * k); ctx.lineWidth = 3;
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, TAU); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = withAlpha(col, 0.08 + 0.2 * k);
+        ctx.beginPath(); ctx.arc(p.x, p.y, R * k, 0, TAU); ctx.fill();
+        // the falling rock
+        const fall = 1 - k;
+        const fy = p.y - fall * 360;
+        ctx.drawImage(glow(col, 32), p.x - 40, fy - 40, 80, 80);
+        ctx.fillStyle = '#fff3d6';
+        ctx.beginPath(); ctx.arc(p.x, fy, 11, 0, TAU); ctx.fill();
+        ctx.strokeStyle = withAlpha(col, 0.6); ctx.lineWidth = 8;
+        ctx.beginPath(); ctx.moveTo(p.x, fy); ctx.lineTo(p.x, fy - 70); ctx.stroke();
+        break;
+      }
       case 'flame': {
         const life = Math.min(1, (b.t || 10) / 20);
         ctx.globalAlpha = 0.5;
@@ -773,6 +819,22 @@ export class Renderer {
       ctx.strokeStyle = withAlpha('#ffffff', k);
       ctx.lineWidth = 5 * k;
       ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    }
+    for (const bo of fx.bolts) {
+      const k = 1 - bo.t / bo.life;
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.strokeStyle = pass ? withAlpha('#ffffff', k) : withAlpha('#fff27a', 0.5 * k);
+        ctx.lineWidth = pass ? 3 : 12 * k;
+        ctx.beginPath();
+        ctx.moveTo(bo.x, bo.y);
+        let cx = bo.x, cy = bo.y;
+        for (let i = 1; i <= 9; i++) {
+          cy = bo.y - i * 70;
+          cx = bo.x + (i === 9 ? 0 : Math.sin(bo.seed + i * 7.1 + pass) * 26);
+          ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
+      }
     }
     for (const a of fx.arcs) {
       const k = 1 - a.t / a.life;

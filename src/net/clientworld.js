@@ -88,7 +88,7 @@ export class ClientWorld {
 
   applyInput(pred, input, build) {
     if (Math.hypot(input.ax, input.ay) > 0.2) { pred.aimX = input.ax; pred.aimY = input.ay; }
-    return stepMovement(pred, input, build.st.speed, dashCooldownTicks(build.st.dashCd), this.map);
+    return stepMovement(pred, input, build.st.speed, dashCooldownTicks(build.st.dashCd), this.map, build.st.dashLen);
   }
 
   // One local fixed tick: predict and return the message to send.

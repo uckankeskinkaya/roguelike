@@ -15,6 +15,7 @@ export class FX {
     this.texts = [];
     this.feed = [];
     this.beams = [];
+    this.bolts = [];
     this.arcs = [];
     this.lights = [];
     this.decals = [];      // queued for the renderer to stamp
@@ -31,7 +32,7 @@ export class FX {
 
   reset() {
     this.particles.clear();
-    this.texts.length = 0; this.feed.length = 0; this.beams.length = 0; this.arcs.length = 0; this.lights.length = 0;
+    this.texts.length = 0; this.feed.length = 0; this.bolts.length = 0; this.beams.length = 0; this.arcs.length = 0; this.lights.length = 0;
     this.trauma = 0; this.hurtFlash = 0; this.whiteFlash = 0; this.banner = null;
   }
 
@@ -218,6 +219,59 @@ export class FX {
           break;
         }
         case 'unlock': break;
+        case 'smite': {
+          const [, x, y, pid, rad] = ev;
+          this.bolts.push({ x, y, t: 0, life: 0.28, seed: Math.random() * 1000 });
+          ps.burst(x, y, 22, '#fff27a', 420, 0.4, 3);
+          ps.add(P.RING, x, y, 0, 0, 0.3, 8, '#fff27a', rad);
+          this.light(x, y, rad * 4, '#fff27a', 0.3);
+          const s = spatial(x, y);
+          sfx('smite', { vol: pid === localPid ? 0.9 : s.vol * 0.5, pan: s.pan });
+          if (pid === localPid) this.shake(0.1);
+          break;
+        }
+        case 'meteorcall': if (ev[1] === localPid) sfx('meteorcall'); break;
+        case 'minedrop': {
+          const [, x, y, pid] = ev;
+          ps.burst(x, y, 6, '#b3ff3a', 90, 0.3, 2);
+          if (pid === localPid) sfx('minedrop');
+          break;
+        }
+        case 'pulse': {
+          const [, pid, wid, x, y, rad] = ev;
+          const col = WEAPONS[wid].color;
+          ps.add(P.RING, x, y, 0, 0, 0.45, 20, col, rad);
+          ps.add(P.RING, x, y, 0, 0, 0.35, 10, '#ffffff', rad * 0.75);
+          ps.burst(x, y, 26, col, rad * 3, 0.5, 3);
+          this.light(x, y, rad * 3, col, 0.3);
+          sfx('quake', { vol: pid === localPid ? 1 : 0.5 });
+          if (pid === localPid) this.shake(0.25);
+          break;
+        }
+        case 'aura': {
+          const [, pid, wid] = ev;
+          const pl = pid === localPid ? listener : null;
+          if (pl) ps.burst(pl.x, pl.y, 8, WEAPONS[wid].color, 220, 0.35, 2.5);
+          break;
+        }
+        case 'dodge': {
+          const [, pid, x, y] = ev;
+          ps.burst(x, y, 12, '#b9a8ff', 260, 0.35, 2.5, P.GHOST);
+          this.texts.push({ x, y: y - 22, vy: -50, t: 0, life: 0.7, text: 'KAÇTI', crit: false, dim: pid !== localPid });
+          if (pid === localPid) sfx('dodge');
+          break;
+        }
+        case 'second': {
+          const [, pid, x, y] = ev;
+          ps.add(P.RING, x, y, 0, 0, 0.8, 20, '#fff27a', 320);
+          ps.burst(x, y, 40, '#fff27a', 520, 0.9, 3);
+          this.light(x, y, 600, '#fff27a', 0.7);
+          this.whiteFlash = Math.max(this.whiteFlash, 0.4);
+          sfx('second');
+          if (pid === localPid) this.showBanner('İKİNCİ ŞANS', 'Ayağa kalktın!', '#fff27a', 1.8);
+          break;
+        }
+        case 'shake': if (ev[1] === localPid) this.shake(ev[2]); break;
         case 'found': {
           const [, , ti, , , tier] = ev;
           const type = POI_TYPES[ti];
@@ -323,6 +377,8 @@ export class FX {
     this.feed = this.feed.filter((f) => f.t < f.life);
     for (const t of this.texts) { t.t += dt; t.y += t.vy * dt; t.vy *= Math.pow(0.05, dt); }
     this.texts = this.texts.filter((t) => t.t < t.life);
+    for (const b of this.bolts) b.t += dt;
+    this.bolts = this.bolts.filter((b) => b.t < b.life);
     for (const b of this.beams) b.t += dt;
     this.beams = this.beams.filter((b) => b.t < b.life);
     for (const a of this.arcs) a.t += dt;

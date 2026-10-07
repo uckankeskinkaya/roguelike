@@ -230,6 +230,42 @@ const SOUNDS = {
   victory: [1000, (d, v) => {
     [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(d, { type: 'square', f0: f, t: i * 0.12, dur: 0.35, vol: 0.07 * v }));
   }],
+  spear: [50, (d, v, p) => {
+    tone(d, { type: 'sawtooth', f0: 900 * p, f1: 300, dur: 0.1, vol: 0.1 * v });
+    noise(d, { dur: 0.08, vol: 0.12 * v, type: 'highpass', f0: 3000 });
+  }],
+  ice: [60, (d, v, p) => {
+    [1800, 2300, 2900].forEach((f, i) => tone(d, { type: 'sine', f0: f * p, f1: f * 0.7, t: i * 0.02, dur: 0.1, vol: 0.05 * v }));
+  }],
+  cannon: [80, (d, v, p) => {
+    noise(d, { dur: 0.3, vol: 0.4 * v, f0: 1200 * p, f1: 120 });
+    tone(d, { type: 'sine', f0: 120 * p, f1: 35, dur: 0.3, vol: 0.5 * v });
+  }],
+  smite: [60, (d, v) => {
+    noise(d, { dur: 0.35, vol: 0.4 * v, type: 'highpass', f0: 2500, f1: 400 });
+    tone(d, { type: 'sawtooth', f0: 2000, f1: 90, dur: 0.18, vol: 0.14 * v });
+    tone(d, { type: 'sine', f0: 70, f1: 30, t: 0.04, dur: 0.4, vol: 0.4 * v });
+  }],
+  meteorcall: [200, (d, v) => {
+    tone(d, { type: 'sine', f0: 1400, f1: 220, dur: 0.7, vol: 0.09 * v, curve: 'lin' });
+    noise(d, { dur: 0.7, vol: 0.1 * v, type: 'bandpass', f0: 2500, f1: 300, q: 1, attack: 0.1 });
+  }],
+  minedrop: [80, (d, v) => {
+    tone(d, { type: 'square', f0: 330, dur: 0.05, vol: 0.06 * v });
+    tone(d, { type: 'square', f0: 220, t: 0.07, dur: 0.07, vol: 0.06 * v });
+  }],
+  quake: [100, (d, v) => {
+    tone(d, { type: 'sine', f0: 90, f1: 28, dur: 0.5, vol: 0.55 * v });
+    noise(d, { dur: 0.4, vol: 0.25 * v, f0: 500, f1: 60 });
+  }],
+  dodge: [100, (d, v) => {
+    tone(d, { type: 'sine', f0: 700, f1: 1500, dur: 0.12, vol: 0.1 * v });
+    noise(d, { dur: 0.1, vol: 0.1 * v, type: 'bandpass', f0: 3000, q: 2 });
+  }],
+  second: [300, (d, v) => {
+    [262, 330, 392, 523, 659, 784].forEach((f, i) => tone(d, { type: 'triangle', f0: f, t: i * 0.06, dur: 0.5, vol: 0.12 * v }));
+    tone(d, { type: 'sine', f0: 65, f1: 130, dur: 0.6, vol: 0.4 * v });
+  }],
   poi: [200, (d, v) => {
     tone(d, { type: 'sawtooth', f0: 110, f1: 330, dur: 0.5, vol: 0.12 * v, curve: 'lin', attack: 0.05 });
     [330, 495, 660].forEach((f, i) => tone(d, { type: 'triangle', f0: f, t: 0.1 + i * 0.07, dur: 0.4, vol: 0.09 * v }));

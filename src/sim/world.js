@@ -11,7 +11,7 @@ import { SKILLS, SKILL_BY_ID, computeStats } from './skills.js';
 import { ENEMIES, AI, clampToArena, BURN_TICKS, GUARDIAN_KITS } from './enemies.js';
 import { stepMovement, dashCooldownTicks } from './player.js';
 import {
-  isBossWave, waveQuota, spawnRate, hpScale, dmgScale, eliteChance, xpForLevel, poolFor,
+  isBossWave, waveQuota, spawnRate, hpScale, dmgScale, eliteChance, xpForLevel, poolFor, teamHp, teamCount,
 } from './waves.js';
 
 const TAU = Math.PI * 2;
@@ -120,21 +120,30 @@ export class Sim {
       // late joiner: starter weapon now, plus a few catch-up picks for the levels they missed
       this.giveWeapon(p, 'kivilcim');
       this.players.push(p);
-      this.queuePicks(p, Math.min(4, Math.max(0, this.level - 1)));
+      this.catchUpPicks(p);
       return p;
     }
     this.players.push(p);
+    this.xpNext = xpForLevel(this.level, this.connectedCount());
     return p;
   }
 
   playerByCid(cid) { return this.players.find((p) => p.cid === cid); }
   playerByPid(pid) { return this.players.find((p) => p.pid === pid); }
 
+  // a player who joined late or was offline owes the level-up picks everyone else got
+  catchUpPicks(p) {
+    const owed = Math.min(6, Math.max(0, this.level - 1 - (p.lvlPicks || 0)));
+    p.lvlPicks = (p.lvlPicks || 0) + owed;
+    this.queuePicks(p, owed);
+  }
+
   setConnected(cid, on) {
     const p = this.playerByCid(cid);
     if (!p) return;
     p.connected = on;
     p.buildVer++;
+    if (on) this.catchUpPicks(p);
     if (!on) this.checkGameOver();
   }
 
@@ -154,7 +163,7 @@ export class Sim {
   giveWeapon(p, id) {
     const owned = p.weapons.find((w) => w.id === id);
     if (owned) owned.tier = Math.min(MAX_TIER, owned.tier + 1);
-    else if (p.weapons.length < MAX_WEAPONS) p.weapons.push({ id, tier: 1, cd: 10 + p.weapons.length * 7 });
+    else if (p.weapons.length < p.st.slots) p.weapons.push({ id, tier: 1, cd: 10 + p.weapons.length * 7 });
     p.buildVer++;
   }
 
@@ -173,7 +182,7 @@ export class Sim {
     for (const id of WEAPON_IDS) {
       const owned = p.weapons.find((w) => w.id === id);
       if (owned && owned.tier < MAX_TIER) pool.push({ t: 'w', id, wt: 1.1 });
-      else if (!owned && p.weapons.length < MAX_WEAPONS) pool.push({ t: 'w', id, wt: 0.55 });
+      else if (!owned && p.weapons.length < p.st.slots) pool.push({ t: 'w', id, wt: 0.55 });
     }
     for (const s of SKILLS) {
       if ((p.skills[s.id] || 0) < s.max) pool.push({ t: 's', id: s.id, wt: 1 });
@@ -274,6 +283,8 @@ export class Sim {
     this.grid.clear();
     for (const e of this.enemies) this.grid.insert(e);
 
+    this.anyTarget = false;
+    for (const e of this.enemies) if (!e.dead && !e.asleep) { this.anyTarget = true; break; }
     for (const p of this.players) this.stepPlayer(p, inputs.get(p.pid));
 
     if (this.tick % 10 === 0) this.stepExplore();
@@ -300,6 +311,7 @@ export class Sim {
     if (input.seq) p.lastSeq = input.seq;
     if (p.iframes > 0) p.iframes--;
     if (p.buffT > 0) p.buffT--;
+    if (p.frenzyT > 0) p.frenzyT--;
 
     // aim: manual if provided, otherwise auto-aim at the nearest enemy
     const al = Math.hypot(input.ax || 0, input.ay || 0);
@@ -316,27 +328,40 @@ export class Sim {
       }
     }
 
-    const r = stepMovement(p, input, p.st.speed, dashCooldownTicks(p.st.dashCd), this.map);
+    const r = stepMovement(p, input, p.st.speed, dashCooldownTicks(p.st.dashCd), this.map, p.st.dashLen);
     if (r === 1) {
-      p.iframes = Math.max(p.iframes, DASH_TICKS + 5);
+      p.iframes = Math.max(p.iframes, DASH_TICKS + p.st.dashLen + 5);
+      p.dashHits = null;
       this.emit('dash', p.pid, p.x, p.y, p.dashDx, p.dashDy);
     } else if (r === 2 && p.st.nova > 0) {
       this.nova(p);
     }
     if (p.downed) return;
 
+    // "Ezici Atılma": enemies you pass through while dashing take damage once
+    if (p.dashT > 0 && p.st.dashHit > 0) {
+      if (!p.dashHits) p.dashHits = new Set();
+      this.grid.query(p.x, p.y, p.r + 40, (e) => {
+        if (e.dead || e.asleep || p.dashHits.has(e.id)) return;
+        if (Math.hypot(e.x - p.x, e.y - p.y) < e.r + p.r + 8) {
+          p.dashHits.add(e.id);
+          this.damageEnemy(e, p.st.dashHit * p.st.damage, p, p.dashDx * 200, p.dashDy * 200);
+        }
+      });
+    }
+
     if (p.st.regen > 0 && p.hp < p.st.maxHp) {
       p.hp = Math.min(p.st.maxHp, p.hp + p.st.regen * DT);
     }
 
     if (this.phase === 'wave') {
-      const canFire = this.enemies.length > 0 || p.manualAim;
+      const canFire = this.anyTarget || p.manualAim;
       for (let i = 0; i < p.weapons.length; i++) {
         const w = p.weapons[i];
         if (w.cd > 0) w.cd--;
         if (w.cd <= 0 && canFire) {
           const ws = weaponStats(w.id, w.tier, p.st);
-          if (this.fire(p, w, ws, i)) w.cd = Math.max(1, Math.round((ws.cooldown / (p.buffT > 0 ? 1.15 : 1)) * TICK_RATE));
+          if (this.fire(p, w, ws, i)) w.cd = Math.max(1, Math.round((ws.cooldown / ((p.buffT > 0 ? 1.15 : 1) * (p.frenzyT > 0 ? 1 + p.st.frenzy : 1))) * TICK_RATE));
         }
       }
       if (p.st.orbitals > 0) this.stepOrbitals(p);
@@ -386,9 +411,87 @@ export class Sim {
         if (!this.arc(p, def, aim, dmg, ws.range, def.chains + p.st.extraProj, m.x, m.y)) return false;
         break;
       }
+      case 'smite': {
+        const cands = this.enemiesInRange(p.x, p.y, ws.range);
+        if (!cands.length) return false;
+        for (let i = 0; i < ws.count && cands.length; i++) {
+          const e = cands.splice(rng.int(0, cands.length - 1), 1)[0];
+          const x = e.x, y = e.y;
+          this.damageEnemy(e, dmg, p, 0, 0);
+          this.grid.query(x, y, ws.splashR, (o) => {
+            if (o === e || o.dead) return;
+            const dx = o.x - x, dy = o.y - y, d = Math.hypot(dx, dy) || 1;
+            if (d < ws.splashR + o.r) this.damageEnemy(o, dmg * 0.5, p, (dx / d) * def.knock, (dy / d) * def.knock);
+          });
+          this.emit('smite', Math.round(x), Math.round(y), p.pid, Math.round(ws.splashR));
+        }
+        return true;
+      }
+      case 'meteor': {
+        const cands = this.enemiesInRange(p.x, p.y, ws.range);
+        if (!cands.length) return false;
+        for (let i = 0; i < ws.count && cands.length; i++) {
+          const e = cands.splice(rng.int(0, cands.length - 1), 1)[0];
+          // aim slightly ahead of a moving target
+          const x = e.x + (e.vx || 0) * def.delay * 0.8, y = e.y + (e.vy || 0) * def.delay * 0.8;
+          this.spawnTimed(p, w, def, ws, x, y, Math.round(def.delay * TICK_RATE));
+        }
+        this.emit('meteorcall', p.pid);
+        return true;
+      }
+      case 'mine': {
+        for (let i = 0; i < ws.count; i++) {
+          const a = rng.range(0, TAU), d = ws.count > 1 ? rng.range(20, 60) : 0;
+          this.spawnTimed(p, w, def, ws, p.x + Math.cos(a) * d, p.y + Math.sin(a) * d, Math.round(def.life * TICK_RATE));
+        }
+        this.emit('minedrop', Math.round(p.x), Math.round(p.y), p.pid);
+        return true;
+      }
+      case 'pulse': {
+        let hit = 0;
+        this.grid.query(p.x, p.y, ws.radius, (e) => {
+          if (e.dead) return;
+          const dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy) || 1;
+          if (d < ws.radius + e.r) { hit++; this.damageEnemy(e, dmg, p, (dx / d) * def.knock * p.st.knockMul, (dy / d) * def.knock * p.st.knockMul); }
+        });
+        if (!hit) return false;
+        for (const b of this.ebullets) if (Math.hypot(b.x - p.x, b.y - p.y) < ws.radius * 0.6) b.dead = true;
+        this.emit('pulse', p.pid, w.id, Math.round(p.x), Math.round(p.y), Math.round(ws.radius));
+        if (def.shake) this.emit('shake', p.pid, def.shake);
+        return true;
+      }
+      case 'aura': {
+        let hit = 0;
+        this.grid.query(p.x, p.y, ws.radius, (e) => {
+          if (e.dead) return;
+          const dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy) || 1;
+          if (d < ws.radius + e.r) { hit++; this.damageEnemy(e, dmg, p, (dx / d) * def.knock, (dy / d) * def.knock, { burn: dmg * 1.4 }); }
+        });
+        if (!hit) return false;
+        this.emit('aura', p.pid, w.id, hit);
+        return true;
+      }
     }
     this.emit('shoot', p.pid, w.id, m.x, m.y, aim);
     return true;
+  }
+
+  enemiesInRange(x, y, range) {
+    const out = [];
+    for (const e of this.enemies) {
+      if (e.dead || e.asleep) continue;
+      if (Math.hypot(e.x - x, e.y - y) < range + e.r) out.push(e);
+    }
+    return out;
+  }
+
+  // stationary timed projectile: mines (explode on contact/expiry) and meteors (explode on expiry)
+  spawnTimed(p, w, def, ws, x, y, life) {
+    this.bullets.push({
+      id: this.id(), owner: p.pid, w: w.id, kind: def.kind, x, y, px: x, py: y, vx: 0, vy: 0, sp: 0,
+      r: def.kind === 'mine' ? 9 : 14, rad: ws.splashR, dmg: ws.damage, knock: def.knock * p.st.knockMul,
+      life, pierce: 0, ricochet: 0, hits: [], t: 0,
+    });
   }
 
   spawnBullet(p, w, def, a, sp, dmg, range, x, y) {
@@ -396,15 +499,17 @@ export class Sim {
       id: this.id(), owner: p.pid, w: w.id, kind: def.kind,
       x, y, px: x, py: y,
       vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, sp,
-      r: def.size, dmg, knock: def.knock,
+      r: def.size * p.st.size, dmg, knock: def.knock * p.st.knockMul,
       life: Math.round((range / Math.max(sp, 1)) * TICK_RATE),
-      pierce: def.kind === 'bullet' || def.kind === 'homing' ? p.st.pierce : 0,
-      ricochet: def.kind === 'bullet' ? p.st.ricochet : 0,
+      pierce: def.kind === 'bullet' || def.kind === 'homing' ? p.st.pierce + (def.pierce || 0) : 0,
+      ricochet: def.kind === 'bullet' ? p.st.ricochet + (def.bounce || 0) : 0,
+      burn: def.burn || 0, frost: def.frost || 0, seek: def.kind === 'bullet' ? p.st.seek : 0,
       hits: [], t: 0,
     };
+    if (def.bounce) b.life = Math.max(b.life, 50);
     if (def.kind === 'flame') { b.pierce = 99; b.life = Math.round((range / sp) * TICK_RATE * 1.6); }
     if (def.kind === 'boomerang') { b.pierce = 999; b.out = Math.round((range / sp) * TICK_RATE * 1.4); b.life = b.out * 4; b.hitT = new Map(); }
-    if (def.kind === 'rocket') b.life = Math.round((range / (sp * 1.8)) * TICK_RATE);
+    if (def.kind === 'rocket') { b.life = Math.round((range / (sp * 1.8)) * TICK_RATE); b.rad = (def.splashR || 0) * p.st.area; }
     this.bullets.push(b);
     return b;
   }
@@ -422,7 +527,7 @@ export class Sim {
       const along = ex * dx + ey * dy;
       if (along < -e.r || along > len + e.r) continue;
       const perp = Math.abs(ex * dy - ey * dx);
-      if (perp < hw + e.r) this.damageEnemy(e, dmg, p, dx * def.knock, dy * def.knock);
+      if (perp < hw + e.r) this.damageEnemy(e, dmg, p, dx * def.knock * p.st.knockMul, dy * def.knock * p.st.knockMul);
     }
     this.emit('beam', x, y, x + dx * len, y + dy * len, p.pid);
   }
@@ -486,7 +591,7 @@ export class Sim {
 
   nova(p) {
     const n = p.st.nova;
-    const r = 105 + 15 * n;
+    const r = (105 + 15 * n) * p.st.area;
     const dmg = 16 * n * p.st.damage;
     this.grid.query(p.x, p.y, r, (e) => {
       if (e.dead) return;
@@ -502,7 +607,11 @@ export class Sim {
     if (e.asleep) this.wakeGuardian(e);
     if (p && p.buffT > 0) dmg *= 1.3;
     let crit = false;
-    if (p && this.rng.next() < p.st.crit) { dmg *= 2.2; crit = true; }
+    if (p) {
+      if (p.st.rage > 0 && p.hp < p.st.maxHp * 0.5) dmg *= 1 + p.st.rage;
+      if (p.st.bossDmg > 0 && (e.elite || e.boss || e.guardian)) dmg *= 1 + p.st.bossDmg;
+      if (this.rng.next() < p.st.crit) { dmg *= p.st.critDmg; crit = true; }
+    }
     e.hp -= dmg;
     e.flash = 5;
     const mass = e.mass || 1;
@@ -513,6 +622,10 @@ export class Sim {
         p.hp = Math.min(p.st.maxHp, p.hp + 1);
       }
       if (p.st.frost > 0) e.slow = 50 + 30 * p.st.frost;
+      if (p.st.bleed > 0 && !(extra && extra.burn)) {
+        e.burn = BURN_TICKS; e.burnDps = Math.max(e.burnDps || 0, 4 * p.st.bleed * p.st.damage); e.burnOwner = p.pid;
+      }
+      if (p.st.execute > 0 && e.hp > 0 && !e.boss && !e.guardian && e.hp < e.maxHp * p.st.execute) e.hp = 0;
     }
     if (extra && extra.burn) { e.burn = BURN_TICKS; e.burnDps = Math.max(e.burnDps || 0, extra.burn); e.burnOwner = p ? p.pid : -1; }
     this.emit('hit', Math.round(e.x), Math.round(e.y - e.r), Math.max(1, Math.round(dmg)), crit ? 1 : 0, p ? p.pid : -1);
@@ -529,7 +642,11 @@ export class Sim {
     if (e.r >= 22 && !def.boss) this.emit('stop', 35);
 
     this.dropXp(e.x, e.y, def.xp * (e.elite ? 5 : 1));
-    if (e.elite || this.rng.next() < 0.018) this.pickups.push(this.mkPickup(e.x, e.y, PICKUP.HEART));
+    if (e.elite || this.rng.next() < 0.018 + (p ? p.st.heartDrop : 0)) this.pickups.push(this.mkPickup(e.x, e.y, PICKUP.HEART));
+    if (p && !p.downed) {
+      if (p.st.killHeal > 0) p.hp = Math.min(p.st.maxHp, p.hp + p.st.killHeal);
+      if (p.st.frenzy > 0) p.frenzyT = 2 * TICK_RATE;
+    }
 
     if (def.guardian) { this.onGuardianKilled(e); return; }
     if (def.split) {
@@ -541,7 +658,7 @@ export class Sim {
     }
     if (e.type === 'bombaci') this.explosion(e.x, e.y, 90, 0, { players: false, enemies: true, enemyDmg: 30, owner: p });
     else if (p && p.st.explodeOnKill > 0 && this.rng.next() < p.st.explodeOnKill) {
-      this.explosion(e.x, e.y, 75, 0, { players: false, enemies: true, enemyDmg: 22 * p.st.damage, owner: p });
+      this.explosion(e.x, e.y, 75 * p.st.area, 0, { players: false, enemies: true, enemyDmg: 22 * p.st.damage, owner: p });
     }
     if (def.boss) this.onBossKilled(e);
   }
@@ -586,11 +703,24 @@ export class Sim {
   hurtPlayer(p, dmg) {
     if (p.downed || !p.connected || p.iframes > 0 || p.dashT > 0) return false;
     if (this.phase !== 'wave') return false;
-    dmg *= 1 - p.st.armor;
+    if (p.st.dodge > 0 && this.rng.next() < p.st.dodge) {
+      p.iframes = 24;
+      this.emit('dodge', p.pid, Math.round(p.x), Math.round(p.y));
+      return false;
+    }
+    dmg = Math.max(1, dmg - p.st.flatArmor) * (1 - p.st.armor);
     p.hp -= dmg;
     p.iframes = 48;
     this.emit('hurt', p.pid, Math.round(p.x), Math.round(p.y), Math.round(dmg));
     this.emit('stop', 70);
+    if (p.hp <= 0 && (p.secondUsed || 0) < p.st.secondWind) {
+      p.secondUsed = (p.secondUsed || 0) + 1;
+      p.hp = p.st.maxHp * 0.5;
+      p.iframes = 150;
+      this.emit('second', p.pid, Math.round(p.x), Math.round(p.y));
+      // clear the screen a little so the comeback is not instantly fatal
+      for (const b of this.ebullets) if (Math.hypot(b.x - p.x, b.y - p.y) < 220) b.dead = true;
+    }
     if (p.hp <= 0) {
       p.hp = 0;
       p.downed = true;
@@ -665,7 +795,7 @@ export class Sim {
     const def = ENEMIES[type];
     const hs = hpScale(Math.max(1, this.wave), this.connectedCount());
     let hp = def.hp * hs;
-    if (def.boss) hp = def.hp * (1 + (this.bossLevel() - 1) * 1.1) * (1 + 0.9 * (this.connectedCount() - 1));
+    if (def.boss) hp = def.hp * (1 + (this.bossLevel() - 1) * 1.1) * (1 + 0.7 * (this.connectedCount() - 1));
     const e = {
       id: this.id(), type, x, y, px: x, py: y,
       vx: 0, vy: 0, kx: 0, ky: 0,
@@ -714,6 +844,9 @@ export class Sim {
       if (e.flash > 0) e.flash--;
       let sp = e.speed;
       if (e.slow > 0) { e.slow--; sp *= 0.6; }
+      for (const q of this.players) {
+        if (q.st.chill > 0 && !q.downed && q.connected && Math.hypot(q.x - e.x, q.y - e.y) < 190) sp *= 1 - Math.min(0.6, q.st.chill) * (e.boss || e.guardian ? 0.5 : 1);
+      }
       if (e.burn > 0) {
         e.burn--;
         if (e.burn % 15 === 0) {
@@ -768,6 +901,7 @@ export class Sim {
         const rr = p.r + e.r - 3;
         if (dx * dx + dy * dy < rr * rr) {
           const hit = this.hurtPlayer(p, e.dmg);
+          if (hit && p.st.thorns > 0) this.damageEnemy(e, p.st.thorns * p.st.damage, p, 0, 0);
           if (hit && e.type === 'bombaci') { e.state = 1; e.st = Math.min(e.st || 40, 6); }
         }
       }
@@ -780,6 +914,7 @@ export class Sim {
       if (b.dead) continue;
       b.t++;
       const owner = this.playerByPid(b.owner);
+      if (b.kind === 'mine' || b.kind === 'meteor') { this.stepTimed(b, owner); continue; }
       if (b.kind === 'flame') { b.vx *= 0.955; b.vy *= 0.955; b.r += 0.35; }
       else if (b.kind === 'rocket') {
         const s = Math.hypot(b.vx, b.vy) || 1;
@@ -808,6 +943,18 @@ export class Sim {
           b.vx = (dx / d) * ns; b.vy = (dy / d) * ns;
           if (d < 22) { b.dead = true; continue; }
         } else { b.dead = true; continue; }
+      } else if (b.seek > 0) {
+        // "hedef arayan mermiler": gentle steering toward the nearest enemy
+        if (b.t % 8 === 1 || !b.tgt || b.tgt.dead) b.tgt = this.nearestEnemy(b.x, b.y, 320);
+        if (b.tgt) {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          let cur = Math.atan2(b.vy, b.vx);
+          let d = Math.atan2(b.tgt.y - b.y, b.tgt.x - b.x) - cur;
+          while (d > Math.PI) d -= TAU;
+          while (d < -Math.PI) d += TAU;
+          cur += Math.max(-1, Math.min(1, d)) * 2.4 * b.seek * DT;
+          b.vx = Math.cos(cur) * sp; b.vy = Math.sin(cur) * sp;
+        }
       }
 
       b.x += b.vx * DT;
@@ -840,7 +987,9 @@ export class Sim {
           b.dead = true;
           return true;
         }
-        this.damageEnemy(e, b.dmg, owner, kx, ky, b.kind === 'flame' ? { burn: WEAPONS.alev.burn * (owner ? owner.st.damage : 1) } : null);
+        this.damageEnemy(e, b.dmg, owner, kx, ky, b.burn ? { burn: b.burn * (owner ? owner.st.damage : 1) } : null);
+        if (b.frost) e.slow = Math.max(e.slow, b.frost);
+        if (owner && owner.st.frag > 0 && b.kind === 'bullet' && !b.frag && this.bullets.length < 320) this.spawnFrags(b, owner, e);
         if (b.kind === 'flame' || b.kind === 'boomerang') return;
         if (b.pierce > 0) { b.pierce--; return; }
         if (b.ricochet > 0) {
@@ -864,11 +1013,40 @@ export class Sim {
     }
   }
 
+  stepTimed(b, owner) {
+    if (b.kind === 'mine' && b.t > 18) {
+      let trig = false;
+      this.grid.query(b.x, b.y, 70, (e) => {
+        if (!e.dead && !e.asleep && Math.hypot(e.x - b.x, e.y - b.y) < e.r + 36) { trig = true; return true; }
+      });
+      if (trig) { this.timedBoom(b, owner); return; }
+    }
+    if (--b.life <= 0) this.timedBoom(b, owner);
+  }
+
+  timedBoom(b, owner) {
+    b.dead = true;
+    this.explosion(b.x, b.y, b.rad, 0, { players: false, enemies: true, enemyDmg: b.dmg, owner });
+  }
+
+  spawnFrags(b, owner, hit) {
+    const n = owner.st.frag * 2, base = Math.atan2(b.vy, b.vx);
+    for (let i = 0; i < n; i++) {
+      const a = base + (i - (n - 1) / 2) * 0.8;
+      this.bullets.push({
+        id: this.id(), owner: b.owner, w: b.w, kind: 'bullet', frag: true,
+        x: b.x, y: b.y, px: b.x, py: b.y, vx: Math.cos(a) * 640, vy: Math.sin(a) * 640, sp: 640,
+        r: 3.5, dmg: b.dmg * 0.35, knock: 20, life: 20, pierce: 0, ricochet: 0, burn: 0, frost: 0, seek: 0,
+        hits: [hit.id], t: 0,
+      });
+    }
+  }
+
   rocketBoom(b, owner) {
-    const def = WEAPONS.roket;
-    const tier = owner ? (owner.weapons.find((w) => w.id === 'roket') || { tier: 1 }).tier : 1;
+    const def = WEAPONS[b.w];
+    const tier = owner ? (owner.weapons.find((w) => w.id === b.w) || { tier: 1 }).tier : 1;
     const dmg = def.splash * (1 + 0.45 * (tier - 1)) * (owner ? owner.st.damage : 1);
-    this.explosion(b.x, b.y, def.splashR, 0, { players: false, enemies: true, enemyDmg: dmg, owner });
+    this.explosion(b.x, b.y, b.rad || def.splashR, 0, { players: false, enemies: true, enemyDmg: dmg, owner });
   }
 
   spawnEBullet(x, y, a, sp, r, dmg, style) {
@@ -935,7 +1113,7 @@ export class Sim {
       this.emit('heal', p.pid, Math.round(p.x), Math.round(p.y));
       return;
     }
-    this.gainXp(k.v);
+    this.gainXp(k.v * p.st.xpMul);
     this.emit('xp', p.pid);
   }
 
@@ -946,7 +1124,7 @@ export class Sim {
       this.level++;
       this.xpNext = xpForLevel(this.level, this.connectedCount());
       this.emit('levelup', this.level);
-      for (const p of this.players) this.queuePicks(p, 1);
+      for (const p of this.players) { if (p.connected) p.lvlPicks = (p.lvlPicks || 0) + 1; this.queuePicks(p, 1); }
     }
   }
 
@@ -1066,12 +1244,13 @@ export class Sim {
     const x = Math.round(poi.x), y = Math.round(poi.y);
     switch (poi.type) {
       case 'chest':
-        for (const p of this.playersNear(poi.x, poi.y, 320)) this.queuePicks(p, poi.tier ? 2 : 1);
+        // everybody gets the same picks at the same time (the game is frozen for all)
+        for (const p of this.players) this.queuePicks(p, poi.tier ? 2 : 1);
         if (poi.tier) for (let i = 0; i < 3; i++) this.pickups.push(this.mkPickup(poi.x, poi.y, PICKUP.HEART));
         break;
       case 'fountain':
         for (const p of this.players) {
-          if (!p.connected || Math.hypot(p.x - poi.x, p.y - poi.y) > 650) continue;
+          if (!p.connected) continue;
           if (p.downed) this.revive(p, 0.5);
           else p.hp = Math.min(p.st.maxHp, p.hp + p.st.maxHp * 0.7);
         }
@@ -1100,7 +1279,7 @@ export class Sim {
     this.hordeDone = false;
     const boss = isBossWave(this.wave);
     // waveLen = enemy quota, waveTicks = enemies still to spawn or kill (0 on boss waves)
-    this.waveLen = boss ? 0 : Math.round(waveQuota(this.wave) * (1 + 0.5 * (this.connectedCount() - 1)));
+    this.waveLen = boss ? 0 : Math.round(waveQuota(this.wave) * teamCount(this.connectedCount()));
     this.waveSpawned = 0;
     this.waveTicks = this.waveLen;
     for (const p of this.players) {
@@ -1156,11 +1335,11 @@ export class Sim {
   stepWave() {
     const boss = isBossWave(this.wave);
     const quotaLeft = boss || this.waveSpawned < this.waveLen;
-    const cap = 100 + 25 * (this.connectedCount() - 1);
+    const cap = Math.min(230, 100 + 25 * (this.connectedCount() - 1));
     if (quotaLeft && this.enemies.length + this.teles.length < cap) {
       const progress = boss ? 1 : this.waveSpawned / this.waveLen;
       const ramp = boss ? 1 : 0.7 + 0.6 * progress;
-      this.spawnAcc += spawnRate(this.wave, boss) * ramp * (1 + 0.6 * (this.connectedCount() - 1)) * DT;
+      this.spawnAcc += spawnRate(this.wave, boss) * ramp * teamCount(this.connectedCount()) * DT;
       while (this.spawnAcc >= 1) { this.spawnAcc--; this.spawnFromPool(); }
     }
     if (boss) return;
