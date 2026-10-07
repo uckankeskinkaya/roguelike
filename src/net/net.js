@@ -29,19 +29,25 @@ const PEER_OPTS = { debug: 1 };
 
 // ICE servers: several STUN servers (direct connections through most NATs) plus
 // TURN relays as a fallback for strict networks (mobile data, offices, CGNAT).
-// Add your own relay with  ?turn=turn:host:3478|user|pass  (kept in this browser).
+// The free public relays are often dead or blocked, so you can add your own free account
+// in Ayarlar (or with  ?turn=url1,url2|user|pass ). It is stored in this browser.
 const DEFAULT_ICE = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] },
   { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
-  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 let customTurn = null;
 export function setTurn(str) {
   customTurn = null;
   if (!str) return;
-  const [url, username, credential] = str.split('|');
-  if (url) customTurn = { urls: [url], ...(username ? { username, credential } : {}) };
+  const [urls, username, credential] = str.split('|');
+  // an invalid entry would make RTCPeerConnection throw and break all online play, so validate first
+  const list = (urls || '').split(',').map((u) => u.trim()).filter((u) => /^(turns?|stuns?):[^\s]+$/i.test(u));
+  const needsAuth = list.some((u) => /^turns?:/i.test(u));
+  if (!list.length) return;
+  if (needsAuth && !(username && username.trim() && credential && credential.trim())) return;
+  customTurn = { urls: list, ...(username ? { username: username.trim(), credential: (credential || '').trim() } : {}) };
 }
+export function hasCustomTurn() { return !!customTurn; }
 function iceConfig() {
   return { iceServers: customTurn ? [customTurn, ...DEFAULT_ICE] : DEFAULT_ICE, iceCandidatePoolSize: 2 };
 }
@@ -499,7 +505,7 @@ export async function runNetTest(report) {
   const lines = [];
   lines.push(res.signaling ? '✔ Sinyal sunucusu: erişilebiliyor' : `✖ Sinyal sunucusu: ULAŞILAMADI (${res.signalErr}). İnterneti, VPN'i, reklam engelleyiciyi ya da DNS'i kontrol et.`);
   lines.push(res.srflx ? '✔ Genel adres (STUN): var' : '✖ Genel adres (STUN): yok — bu ağ WebRTC için kısıtlı olabilir');
-  lines.push(res.relay ? '✔ Yedek röle (TURN): var' : '⚠ Yedek röle (TURN): yok — farklı ağdaki bazı kişilere bağlanılamayabilir');
+  lines.push(res.relay ? '✔ Yedek röle (TURN): var' : '⚠ Yedek röle (TURN): YOK — farklı ağlardaki (özellikle mobil veri) oyuncularla bağlantı kurulamayabilir. Çözüm: Ayarlar → TURN sunucusu bölümüne ücretsiz bir TURN hesabı gir (README\'de adım adım).');
   if (res.signaling && (res.srflx || res.relay)) lines.push('Sonuç: bu cihaz co-op için hazır.');
   else if (res.signaling) lines.push('Sonuç: oda kurabilirsin ama uzak oyuncular bağlanamayabilir. Aynı Wi-Fi\'de dene.');
   else lines.push('Sonuç: co-op şu an çalışmaz. Önce sinyal sunucusuna erişimi çöz.');

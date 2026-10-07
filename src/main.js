@@ -499,7 +499,8 @@ $('btn-start').addEventListener('click', () => hostStart());
 ui.onBack['scr-lobby'] = () => quitToMenu(true);
 $('btn-copy').addEventListener('click', async () => {
   const sig = store.get('signal', '');
-  const link = `${location.origin}${location.pathname}?oda=${G.code}${sig ? `&sinyal=${encodeURIComponent(sig)}` : ''}`;
+  const turnCfg = store.get('turn', '');
+  const link = `${location.origin}${location.pathname}?oda=${G.code}${sig ? `&sinyal=${encodeURIComponent(sig)}` : ''}${turnCfg ? `&turn=${encodeURIComponent(turnCfg)}` : ''}`;
   try {
     if (navigator.share && input.device === 'touch') await navigator.share({ title: 'Neon Kuyu', text: `Oda kodu: ${G.code}`, url: link });
     else { await navigator.clipboard.writeText(link); ui.toast('Davet linki kopyalandı'); }
@@ -526,10 +527,19 @@ function openSettings() {
   $('set-music').value = settings.music;
   $('set-shake').value = settings.shake;
   $('set-numbers').checked = settings.numbers;
+  const [tu, tn, tp] = (store.get('turn', '') || '').split('|');
+  $('set-turn-urls').value = tu || ''; $('set-turn-user').value = tn || ''; $('set-turn-pass').value = tp || '';
   ui.show('scr-settings', true);
 }
 for (const [id, key] of [['set-sfx', 'sfx'], ['set-music', 'music'], ['set-shake', 'shake']]) {
   $(id).addEventListener('input', (e) => { settings[key] = parseFloat(e.target.value); applySettings(); saveSettings(); });
+}
+for (const id of ['set-turn-urls', 'set-turn-user', 'set-turn-pass']) {
+  $(id).addEventListener('input', () => {
+    const v = $('set-turn-urls').value.trim() ? [$('set-turn-urls').value.trim(), $('set-turn-user').value.trim(), $('set-turn-pass').value.trim()].join('|') : '';
+    store.set('turn', v);
+    setTurn(v);
+  });
 }
 $('set-numbers').addEventListener('change', (e) => { settings.numbers = e.target.checked; applySettings(); saveSettings(); });
 

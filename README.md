@@ -97,6 +97,12 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
   sekmesinin telefonda arka plana düşmesi (oda kapanır, geri dönünce otomatik açılır), mobil veri/okul/iş
   ağı/VPN gibi kısıtlı ağlar (WebRTC doğrudan bağlanamaz, TURN gerekir), reklam engelleyici. Kendi
   röle sunucunu (ör. coturn) eklemek için linke `&turn=turn:alanadin.com:3478|kullanici|sifre` ekle; ayar tarayıcıda saklanır.
+  **Ücretsiz TURN kurulumu** (farklı ağlardaki oyuncularla bağlanamıyorsan, test "TURN: YOK" diyorsa):
+  herkese açık ücretsiz röleler çoğunlukla çalışmıyor, bu yüzden kendi hesabını aç: örn.
+  [metered.ca](https://www.metered.ca) (ücretsiz katman) ya da kendi coturn sunucun. Panelin verdiği
+  TURN adreslerini, kullanıcı adını ve parolayı oyunda **Ayarlar → TURN sunucusu**'na gir (adresleri virgülle
+  ayır). Ayar tarayıcında saklanır ve **davet linkine otomatik eklenir**: arkadaşların ayrıca bir şey girmez
+  (linkte bu bilgi görünür, bu yüzden yalnızca ücretsiz/harcanabilir bir hesap kullan). Sonra **Bağlantı testi** ile TURN'ün "var" çıktığını doğrula.
   İstemci 3 kez dener (her biri ~22 sn) ve ağ durumunu ekranda gösterir.
 - Host oyunu simüle eder. Bağlantısı kopan oyuncunun karakteri sahnede "bağlantı yok" olarak
   bekler: aynı sekme yenilenip tekrar katılınca karakterini geri alır. Oyundan bilerek ayrılan
