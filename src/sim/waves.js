@@ -29,11 +29,11 @@ export function spawnRate(w, boss) {
 }
 
 export function hpScale(w, players) {
-  return (1 + 0.12 * (w - 1) + 0.012 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
+  return (1 + 0.14 * (w - 1) + 0.015 * (w - 1) * (w - 1)) * (1 + 0.75 * (players - 1));
 }
 
 export function dmgScale(w) {
-  return 1 + 0.055 * (w - 1);
+  return 1 + 0.06 * (w - 1);
 }
 
 export function eliteChance(w) {

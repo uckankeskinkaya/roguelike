@@ -34,7 +34,7 @@ for (let r = 0; r < runs; r++) {
   const inputs = new Map();
   const waveTimes = {};
   let t = 0, lastBonusWave = -1;
-  while (sim.phase !== 'gameover' && sim.phase !== 'victory' && t < 60 * 60 * 90) {
+  while (sim.phase !== 'gameover' && sim.phase !== 'victory' && t < 60 * 60 * 45) {
     for (const p of sim.players) {
       inputs.set(p.pid, botInput(sim, p, t));
       if (p.picks > 0 && sim.phase === 'pick') {

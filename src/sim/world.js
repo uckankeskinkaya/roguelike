@@ -667,6 +667,17 @@ export class Sim {
         }
       }
       const t = this.nearestPlayer(e.x, e.y);
+      // stragglers: an enemy that is far away or wedged behind rocks would keep the
+      // wave open forever, so bring it back around the team
+      if (t && !e.boss && !e.guardian && (this.tick + e.id) % 120 === 0) {
+        const d = Math.hypot(t.x - e.x, t.y - e.y);
+        const moved = e.sx === undefined ? 1e9 : Math.hypot(e.x - e.sx, e.y - e.sy);
+        e.sx = e.x; e.sy = e.y;
+        if (d > 800 || (d > 450 && moved < 15)) {
+          const pt = this.spawnAround(450, 650);
+          e.x = pt.x; e.y = pt.y; e.kx = 0; e.ky = 0; e.sx = pt.x; e.sy = pt.y;
+        }
+      }
       AI[def.ai](this, e, t, sp);
       if (e.dead) continue;
 
