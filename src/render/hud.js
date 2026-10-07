@@ -4,6 +4,8 @@ import { TIER_NAMES } from '../sim/weapons.js';
 import { ENEMIES } from '../sim/enemies.js';
 import { drawWeapon } from './icons.js';
 import { dashCooldownTicks } from '../sim/player.js';
+import { drawMinimap } from './mapart.js';
+import { GUARDIAN_COLORS } from '../sim/map.js';
 
 function bar(ctx, x, y, w, h, frac, col, bg = 'rgba(0,0,0,0.55)') {
   ctx.fillStyle = bg;
@@ -71,6 +73,34 @@ export function drawHUD(r, view, localPid, info) {
     ctx.textAlign = 'left';
   }
 
+  // --- buff indicator
+  if (me && me.buffT > 0) {
+    ctx.font = `800 ${11 * S}px system-ui, sans-serif`;
+    ctx.fillStyle = '#c08bff';
+    ctx.textAlign = 'left';
+    ctx.fillText(`✦ Savaş Totemi  ${Math.ceil(me.buffT / TICK_RATE)} sn`, 18, pad + 46 * S);
+  }
+
+  // --- minimap + loot feed (right side, under the pause button)
+  const mw = Math.round(Math.min(200, Math.max(120, w * 0.17)) * (small ? 0.85 : 1));
+  const mx = w - 16 - mw, my = pad + 104;
+  const mh = drawMinimap(r, view, localPid, mx, my, mw, r.time) || 0;
+  {
+    ctx.textAlign = 'right';
+    ctx.font = `700 ${12 * S}px system-ui, sans-serif`;
+    let fy = my + mh + 18;
+    for (const f of fx.feed) {
+      const k = f.t / f.life;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 3, f.t * 6);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.lineJoin = 'round';
+      ctx.strokeText(f.text, w - 16, fy);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, w - 16, fy);
+      fy += 18 * S;
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // --- teammates
   if (view.players.length > 1) {
     let y = pad + 52 * S;
@@ -119,6 +149,24 @@ export function drawHUD(r, view, localPid, info) {
     ctx.font = `800 ${12 * S}px system-ui, sans-serif`;
     ctx.fillStyle = '#ffd0d8';
     ctx.fillText(ENEMIES.gozcu.name.toUpperCase() + (boss.hp < boss.maxHp * 0.5 ? ' — ÖFKELİ' : ''), cx, by + 28);
+  }
+
+  // awake guardian bar (closest one to the local player)
+  if (!boss && me) {
+    let g = null, gd = 1000;
+    for (const e of view.enemies) {
+      if (!e.guardian || e.asleep) continue;
+      const d = Math.hypot(e.x - me.x, e.y - me.y);
+      if (d < gd) { gd = d; g = e; }
+    }
+    if (g) {
+      const bw = Math.min(380, w * 0.45), by = pad + 64 * S;
+      const col = GUARDIAN_COLORS[g.v || 0];
+      bar(ctx, cx - bw / 2, by, bw, 9, g.hp / g.maxHp, col);
+      ctx.font = `800 ${11 * S}px system-ui, sans-serif`;
+      ctx.fillStyle = col;
+      ctx.fillText('MUHAFIZ', cx, by + 22);
+    }
   }
 
   // countdown

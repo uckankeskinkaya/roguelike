@@ -4,8 +4,8 @@ export const TICK_RATE = 60;            // simulation ticks per second
 export const DT = 1 / TICK_RATE;        // seconds per tick
 export const TICK_MS = 1000 / TICK_RATE;
 
-export const ARENA_W = 1800;
-export const ARENA_H = 1200;
+export const ARENA_W = 3600;
+export const ARENA_H = 2400;
 
 export const MAX_PLAYERS = 8;
 export const MAX_WEAPONS = 4;

@@ -433,7 +433,7 @@ function frame(now) {
     if (view.wave <= 1 && view.phase !== 'gameover') {
       hint = input.device === 'gamepad' ? 'Sol analog: hareket · Sağ analog: nişan · A/RB: atıl · Start: menü'
         : input.device === 'touch' ? ''
-          : 'WASD: hareket · Fare: nişan · Boşluk: atıl · Silahlar otomatik ateş eder · Esc: menü';
+          : 'WASD: hareket · Fare: nişan · Boşluk: atıl · Haritadaki yapıların üstünde dur · Esc: menü';
     }
     drawHUD(renderer, view, G.localPid, { netText, hint, hideBanner: !$('scr-pick').hidden });
     input.drawTouch(renderer.ctx);

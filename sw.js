@@ -1,6 +1,6 @@
 // Service worker: precaches the app shell so the game opens offline.
 // Bump VERSION on every deploy so clients pick up the new files.
-const VERSION = 'neonkuyu-v2';
+const VERSION = 'neonkuyu-v3';
 const SHELL = [
   './',
   'index.html',
@@ -21,12 +21,14 @@ const SHELL = [
   'src/sim/skills.js',
   'src/sim/enemies.js',
   'src/sim/waves.js',
+  'src/sim/map.js',
   'src/render/renderer.js',
   'src/render/fx.js',
   'src/render/hud.js',
   'src/render/particles.js',
   'src/render/sprites.js',
   'src/render/icons.js',
+  'src/render/mapart.js',
   'src/input/input.js',
   'src/audio/sfx.js',
   'src/ui/ui.js',

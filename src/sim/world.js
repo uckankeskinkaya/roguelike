@@ -5,9 +5,10 @@ import {
   PICK_TIMEOUT, REVIVE_TICKS, DASH_TICKS,
 } from '../config.js';
 import { RNG } from '../rng.js';
+import { genMap, POI_DEFS, POI_TYPES } from './map.js';
 import { WEAPONS, WEAPON_IDS, STARTER_WEAPONS, MAX_TIER, weaponStats } from './weapons.js';
-import { SKILLS, computeStats } from './skills.js';
-import { ENEMIES, AI, clampToArena, BURN_TICKS } from './enemies.js';
+import { SKILLS, SKILL_BY_ID, computeStats } from './skills.js';
+import { ENEMIES, AI, clampToArena, BURN_TICKS, GUARDIAN_KITS } from './enemies.js';
 import { stepMovement, dashCooldownTicks } from './player.js';
 import {
   isBossWave, waveQuota, spawnRate, hpScale, dmgScale, eliteChance, xpForLevel, poolFor,
@@ -69,6 +70,12 @@ export class Sim {
     this.hordeDone = false;
     this.kills = 0;
     this.grid = new Grid();
+    this.map = genMap(seedNum);
+    this.pois = this.map.pois.map((d, i) => ({
+      id: i + 1, type: d.type, x: d.x, y: d.y, tier: d.tier, r: POI_DEFS[d.type].r,
+      state: 0, prog: 0, locked: d.guard >= 0, total: 0, charge: 0, guard: 0,
+    }));
+    this.map.pois.forEach((d, i) => { if (d.guard >= 0) this.spawnGuardian(this.pois[i], d.guard); });
   }
 
   id() {
@@ -100,7 +107,7 @@ export class Sim {
       downed: false, reviveT: 0,
       connected: true, lastSeq: 0,
       regenAcc: 0, orbHits: new Map(),
-      kills: 0, dmg: 0, buildVer: 1,
+      kills: 0, dmg: 0, buildVer: 1, buffT: 0,
     };
     p.px = p.x; p.py = p.y;
     p.hp = p.st.maxHp;
@@ -217,6 +224,7 @@ export class Sim {
     } else if (this.phase === 'wave') this.stepWave();
 
     this.stepTelegraphs();
+    this.stepPois();
     this.stepEnemies();
     this.stepBullets();
     this.stepEBullets();
@@ -233,6 +241,7 @@ export class Sim {
     if (!input || !p.connected) input = { mx: 0, my: 0, ax: 0, ay: 0, dash: false };
     if (input.seq) p.lastSeq = input.seq;
     if (p.iframes > 0) p.iframes--;
+    if (p.buffT > 0) p.buffT--;
 
     // aim: manual if provided, otherwise auto-aim at the nearest enemy
     const al = Math.hypot(input.ax || 0, input.ay || 0);
@@ -249,7 +258,7 @@ export class Sim {
       }
     }
 
-    const r = stepMovement(p, input, p.st.speed, dashCooldownTicks(p.st.dashCd));
+    const r = stepMovement(p, input, p.st.speed, dashCooldownTicks(p.st.dashCd), this.map);
     if (r === 1) {
       p.iframes = Math.max(p.iframes, DASH_TICKS + 5);
       this.emit('dash', p.pid, p.x, p.y, p.dashDx, p.dashDy);
@@ -269,7 +278,7 @@ export class Sim {
         if (w.cd > 0) w.cd--;
         if (w.cd <= 0 && canFire) {
           const ws = weaponStats(w.id, w.tier, p.st);
-          if (this.fire(p, w, ws, i)) w.cd = Math.max(1, Math.round(ws.cooldown * TICK_RATE));
+          if (this.fire(p, w, ws, i)) w.cd = Math.max(1, Math.round((ws.cooldown / (p.buffT > 0 ? 1.15 : 1)) * TICK_RATE));
         }
       }
       if (p.st.orbitals > 0) this.stepOrbitals(p);
@@ -432,6 +441,8 @@ export class Sim {
 
   damageEnemy(e, dmg, p, kx, ky, extra) {
     if (e.dead) return;
+    if (e.asleep) this.wakeGuardian(e);
+    if (p && p.buffT > 0) dmg *= 1.3;
     let crit = false;
     if (p && this.rng.next() < p.st.crit) { dmg *= 2.2; crit = true; }
     e.hp -= dmg;
@@ -462,6 +473,7 @@ export class Sim {
     this.dropXp(e.x, e.y, def.xp * (e.elite ? 5 : 1));
     if (e.elite || this.rng.next() < 0.018) this.pickups.push(this.mkPickup(e.x, e.y, PICKUP.HEART));
 
+    if (def.guardian) { this.onGuardianKilled(e); return; }
     if (def.split) {
       for (let i = 0; i < 2; i++) {
         const c = this.spawnEnemy(def.split, e.x + (i ? 8 : -8), e.y, false);
@@ -567,7 +579,7 @@ export class Sim {
   nearestEnemy(x, y, maxD) {
     let best = null, bd = maxD;
     for (const e of this.enemies) {
-      if (e.dead) continue;
+      if (e.dead || e.asleep) continue;
       const d = Math.hypot(e.x - x, e.y - y) - e.r;
       if (d < bd) { bd = d; best = e; }
     }
@@ -585,10 +597,10 @@ export class Sim {
   }
 
   // --------------------------------------------------------------- enemies
-  addTelegraph(x, y, type, elite, dur = 50) {
+  addTelegraph(x, y, type, elite, dur = 50, tag = 0) {
     x = Math.max(30, Math.min(ARENA_W - 30, x));
     y = Math.max(30, Math.min(ARENA_H - 30, y));
-    this.teles.push({ id: this.id(), x, y, type, elite, t: 0, dur });
+    this.teles.push({ id: this.id(), x, y, type, elite, t: 0, dur, tag });
   }
 
   spawnEnemy(type, x, y, elite) {
@@ -628,7 +640,8 @@ export class Sim {
     for (const t of this.teles) {
       if (++t.t >= t.dur) {
         t.dead = true;
-        this.spawnEnemy(t.type, t.x, t.y, t.elite);
+        const ne = this.spawnEnemy(t.type, t.x, t.y, t.elite);
+        if (t.tag) ne.poi = t.tag;
         this.emit('spawn', Math.round(t.x), Math.round(t.y), t.type);
       }
     }
@@ -662,7 +675,7 @@ export class Sim {
       e.kx *= 0.86; e.ky *= 0.86;
 
       // separation (soft) using the spatial grid
-      if (!e.boss) {
+      if (!e.boss && !e.guardian) {
         grid.query(e.x, e.y, e.r, (o) => {
           if (o === e || o.dead) return;
           const dx = e.x - o.x, dy = e.y - o.y;
@@ -676,8 +689,10 @@ export class Sim {
         });
       }
       clampToArena(e);
+      if (!e.boss && !e.guardian) this.map.collide(e, e.r);
 
       // contact damage
+      if (e.asleep) continue;
       for (const p of this.players) {
         if (p.downed || !p.connected) continue;
         const dx = p.x - e.x, dy = p.y - e.y;
@@ -797,10 +812,16 @@ export class Sim {
   }
 
   stepEBullets() {
+    this.blockedEv = 0;
     for (const b of this.ebullets) {
       b.x += b.vx * DT;
       b.y += b.vy * DT;
       if (--b.life <= 0 || b.x < -20 || b.y < -20 || b.x > ARENA_W + 20 || b.y > ARENA_H + 20) { b.dead = true; continue; }
+      if (this.map.blocked(b.x, b.y, b.r)) {
+        b.dead = true;
+        if (this.blockedEv++ < 3) this.emit('ebhit', Math.round(b.x), Math.round(b.y));
+        continue;
+      }
       for (const p of this.players) {
         if (p.downed || !p.connected) continue;
         const dx = p.x - b.x, dy = p.y - b.y;
@@ -860,6 +881,166 @@ export class Sim {
     }
   }
 
+  // ------------------------------------------------- map: guardians & POIs
+  spawnGuardian(poi, variant) {
+    const a = this.rng.range(0, TAU);
+    const x = poi.x + Math.cos(a) * 150, y = poi.y + Math.sin(a) * 150;
+    const e = this.spawnEnemy('muhafiz', x, y, false);
+    e.guardian = true; e.asleep = true; e.hx = x; e.hy = y; e.v = variant % GUARDIAN_KITS.length;
+    e.kit = GUARDIAN_KITS[e.v]; e.lose = 0; e.chest = poi.id; e.lvl = 1; e.charging = 0;
+    e.hp = e.maxHp = ENEMIES.muhafiz.hp;
+    e.pat = -1; e.st = 60;
+    poi.guard = e.id;
+    return e;
+  }
+
+  wakeGuardian(e) {
+    if (!e.asleep) return;
+    e.asleep = false;
+    const w = Math.max(1, this.wave);
+    e.maxHp = ENEMIES.muhafiz.hp * hpScale(w, this.connectedCount()) * 1.4;
+    e.hp = e.maxHp;
+    e.dmg = ENEMIES.muhafiz.dmg * dmgScale(w);
+    e.lvl = 1 + Math.floor(w / 10);
+    e.state = 0; e.st = 70; e.pat = -1; e.pt = 0; e.lose = 0;
+    this.emit('wake', Math.round(e.x), Math.round(e.y), e.v, e.id);
+  }
+
+  onGuardianKilled(e) {
+    this.emit('gdead', Math.round(e.x), Math.round(e.y), e.v);
+    this.emit('stop', 140);
+    this.dropXp(e.x, e.y, 20 + this.wave);
+    for (let i = 0; i < 3; i++) this.pickups.push(this.mkPickup(e.x, e.y, PICKUP.HEART));
+    for (const p of this.players) if (p.connected) this.grantLoot(p, 2);
+    const chest = this.pois.find((q) => q.id === e.chest);
+    if (chest) { chest.locked = false; this.emit('unlock', chest.id, Math.round(chest.x), Math.round(chest.y)); }
+  }
+
+  // Gives `n` random upgrades immediately (skills mostly, weapon tiers sometimes).
+  grantLoot(p, n) {
+    for (let i = 0; i < n; i++) {
+      const pool = [];
+      for (const sk of SKILLS) if ((p.skills[sk.id] || 0) < sk.max) pool.push({ t: 's', id: sk.id, wt: 1 });
+      for (const w of p.weapons) if (w.tier < MAX_TIER) pool.push({ t: 'w', id: w.id, wt: 0.9 });
+      if (!pool.length) return;
+      const c = this.rng.weighted(pool, (x) => x.wt);
+      if (c.t === 'w') this.giveWeapon(p, c.id);
+      else {
+        p.skills[c.id] = (p.skills[c.id] || 0) + 1;
+        this.recalc(p);
+        if (c.id === 'can') p.hp = p.st.maxHp;
+      }
+      this.emit('loot', p.pid, c.t, c.id);
+    }
+  }
+
+  playersNear(x, y, r) {
+    const out = [];
+    for (const p of this.players) {
+      if (p.connected && !p.downed && Math.hypot(p.x - x, p.y - y) <= r + p.r) out.push(p);
+    }
+    return out;
+  }
+
+  stepPois() {
+    const wave = this.phase === 'wave';
+    for (const poi of this.pois) {
+      if (poi.state === 2) continue;
+      const def = POI_DEFS[poi.type];
+
+      if (poi.state === 1) {
+        if (poi.type === 'shrine') {
+          let left = 0;
+          for (const e of this.enemies) if (e.poi === poi.id && !e.dead) left++;
+          for (const t of this.teles) if (t.tag === poi.id) left++;
+          poi.prog = Math.round(255 * (1 - left / Math.max(1, poi.total)));
+          if (left === 0) this.finishPoi(poi);
+        } else if (poi.type === 'pylon') {
+          const inside = wave ? this.playersNear(poi.x, poi.y, poi.r).length : 0;
+          if (inside) {
+            poi.charge++;
+            if (poi.charge % Math.max(25, 60 - this.wave) === 0 && this.enemies.length + this.teles.length < 90) {
+              const a = this.rng.range(0, TAU), d = this.rng.range(300, 420);
+              const pool = poolFor(Math.max(1, this.wave));
+              const c = this.rng.weighted(pool, (x) => x.weight);
+              const n = c.group > 1 ? 3 : 1;
+              for (let i = 0; i < n; i++) {
+                this.addTelegraph(poi.x + Math.cos(a) * d + this.rng.range(-40, 40), poi.y + Math.sin(a) * d + this.rng.range(-40, 40), c.type, false, 45);
+              }
+            }
+          } else poi.charge = Math.max(0, poi.charge - 2);
+          poi.prog = Math.round((255 * poi.charge) / def.charge);
+          if (poi.charge >= def.charge) this.finishPoi(poi);
+        }
+        continue;
+      }
+
+      // idle: fill the hold meter while somebody stands inside
+      if (poi.locked) { poi.prog = 0; continue; }
+      const inside = wave ? this.playersNear(poi.x, poi.y, poi.r).length : 0;
+      if (inside) poi.hold = (poi.hold || 0) + 1; else poi.hold = Math.max(0, (poi.hold || 0) - 2);
+      poi.prog = Math.round((255 * poi.hold) / def.hold);
+      if (poi.hold >= def.hold) this.activatePoi(poi);
+    }
+  }
+
+  activatePoi(poi) {
+    poi.hold = 0;
+    poi.prog = 0;
+    const x = Math.round(poi.x), y = Math.round(poi.y);
+    if (poi.type === 'chest' || poi.type === 'fountain' || poi.type === 'totem') {
+      this.finishPoi(poi);
+      return;
+    }
+    poi.state = 1;
+    if (poi.type === 'shrine') {
+      const n = Math.min(18, 6 + Math.floor(this.wave * 0.5) + (this.connectedCount() - 1) * 2);
+      poi.total = n;
+      const pool = poolFor(Math.max(1, this.wave));
+      for (let i = 0; i < n; i++) {
+        const c = this.rng.weighted(pool, (q) => q.weight);
+        const a = (i / n) * TAU + this.rng.range(-0.2, 0.2);
+        const elite = this.wave >= 3 && c.group === 1 && i < 2;
+        this.addTelegraph(poi.x + Math.cos(a) * 230, poi.y + Math.sin(a) * 230, c.type, elite, 55 + (i % 4) * 8, poi.id);
+      }
+    } else if (poi.type === 'pylon') {
+      poi.charge = 0;
+    }
+    this.emit('poiact', poi.id, POI_TYPES.indexOf(poi.type), x, y);
+  }
+
+  finishPoi(poi) {
+    poi.state = 2;
+    poi.prog = 255;
+    const x = Math.round(poi.x), y = Math.round(poi.y);
+    switch (poi.type) {
+      case 'chest':
+        for (const p of this.playersNear(poi.x, poi.y, 320)) this.grantLoot(p, poi.tier ? 2 : 1);
+        if (poi.tier) for (let i = 0; i < 3; i++) this.pickups.push(this.mkPickup(poi.x, poi.y, PICKUP.HEART));
+        break;
+      case 'fountain':
+        for (const p of this.players) {
+          if (!p.connected || Math.hypot(p.x - poi.x, p.y - poi.y) > 650) continue;
+          if (p.downed) this.revive(p, 0.5);
+          else p.hp = Math.min(p.st.maxHp, p.hp + p.st.maxHp * 0.7);
+        }
+        break;
+      case 'totem':
+        for (const p of this.players) if (p.connected) p.buffT = 45 * TICK_RATE;
+        break;
+      case 'shrine':
+        for (const p of this.players) if (p.connected) this.grantLoot(p, 2);
+        for (let i = 0; i < 2; i++) this.pickups.push(this.mkPickup(poi.x, poi.y, PICKUP.HEART));
+        break;
+      case 'pylon':
+        // a fountain of gems worth roughly a level and a half
+        this.dropXp(poi.x, poi.y, Math.ceil(this.xpNext * 1.4));
+        this.pickups.push(this.mkPickup(poi.x, poi.y, PICKUP.HEART));
+        break;
+    }
+    this.emit('poidone', poi.id, POI_TYPES.indexOf(poi.type), x, y, poi.tier);
+  }
+
   // ----------------------------------------------------------------- waves
   stepPick() {
     if (this.assignPending) {
@@ -914,7 +1095,7 @@ export class Sim {
     }
     this.emit('wave', this.wave, boss ? 1 : 0);
     if (boss) {
-      const c = this.farPoint(420);
+      const c = this.spawnAround(450, 700);
       this.addTelegraph(c.x, c.y, 'gozcu', false, 110);
     } else {
       // opening pack so the arena is never empty
@@ -923,21 +1104,32 @@ export class Sim {
     }
   }
 
-  farPoint(minD) {
-    let pt = { x: ARENA_W / 2, y: ARENA_H / 2 };
-    for (let i = 0; i < 20; i++) {
-      const x = this.rng.range(80, ARENA_W - 80), y = this.rng.range(80, ARENA_H - 80);
-      const t = this.nearestPlayer(x, y);
-      pt = { x, y };
-      if (!t || Math.hypot(t.x - x, t.y - y) > minD) break;
+  // A point 'minD'..'maxD' away from a random living player, inside the map
+  // and not inside an obstacle: enemies appear just off-screen around the team.
+  spawnAround(minD, maxD) {
+    const alive = this.players.filter((p) => p.connected && !p.downed);
+    const base = alive.length ? alive[this.rng.int(0, alive.length - 1)] : { x: ARENA_W / 2, y: ARENA_H / 2 };
+    let x = base.x, y = base.y;
+    for (let i = 0; i < 12; i++) {
+      const a = this.rng.range(0, TAU), d = this.rng.range(minD, maxD);
+      x = Math.max(60, Math.min(ARENA_W - 60, base.x + Math.cos(a) * d));
+      y = Math.max(60, Math.min(ARENA_H - 60, base.y + Math.sin(a) * d));
+      if (!this.map.blocked(x, y, 40)) break;
     }
-    return pt;
+    return { x, y };
+  }
+
+  // enemies that count toward clearing a wave (guardians are optional bosses)
+  liveEnemies() {
+    let n = 0;
+    for (const e of this.enemies) if (!e.dead && !e.guardian) n++;
+    return n;
   }
 
   spawnFromPool() {
     const pool = poolFor(this.wave);
     const c = this.rng.weighted(pool, (x) => x.weight);
-    const pt = this.farPoint(240);
+    const pt = this.spawnAround(430, 760);
     const elite = c.group === 1 && this.rng.next() < eliteChance(this.wave);
     const n = c.group > 1 ? c.group + Math.floor(this.wave / 4) : 1;
     for (let i = 0; i < n; i++) {
@@ -957,11 +1149,13 @@ export class Sim {
       while (this.spawnAcc >= 1) { this.spawnAcc--; this.spawnFromPool(); }
     }
     if (boss) return;
-    this.waveTicks = Math.max(0, this.waveLen - this.waveSpawned) + this.enemies.length + this.teles.length;
+    const live = this.liveEnemies();
+    this.waveTicks = Math.max(0, this.waveLen - this.waveSpawned) + live + this.teles.length;
     // mid-wave horde: a ring of enemies closes in around a random player
     if (!this.hordeDone && this.wave >= 4 && this.waveSpawned >= this.waveLen * 0.55) {
       this.hordeDone = true;
-      const t = this.nearestPlayer(this.rng.range(0, ARENA_W), this.rng.range(0, ARENA_H));
+      const alive = this.players.filter((q) => q.connected && !q.downed);
+      const t = alive.length ? alive[this.rng.int(0, alive.length - 1)] : null;
       if (t) {
         const n = Math.min(26, 8 + Math.floor(this.wave * 0.6));
         const type = this.wave >= 12 && this.rng.chance(0.5) ? 'yavru' : 'sinek';
@@ -973,7 +1167,7 @@ export class Sim {
         this.emit('horde');
       }
     }
-    if (this.waveSpawned >= this.waveLen && this.enemies.length === 0 && this.teles.length === 0) this.endWave();
+    if (this.waveSpawned >= this.waveLen && live === 0 && this.teles.length === 0) this.endWave();
   }
 
   onBossKilled(e) {
@@ -991,7 +1185,7 @@ export class Sim {
 
   endWave() {
     for (const e of this.enemies) {
-      if (e.dead) continue;
+      if (e.dead || e.guardian) continue;
       e.dead = true;
       this.emit('kill', Math.round(e.x), Math.round(e.y), e.type, e.r, 0);
     }

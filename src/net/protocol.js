@@ -1,11 +1,12 @@
 // Compact binary snapshot format (host -> clients) + JSON meta section.
 import { WEAPON_IDS, WEAPON_INDEX } from '../sim/weapons.js';
 import { ENEMY_IDS, ENEMY_INDEX, ENEMIES } from '../sim/enemies.js';
+import { POI_TYPES, POI_DEFS } from '../sim/map.js';
 import { WEAPONS } from '../sim/weapons.js';
 import { PLAYER_RADIUS } from '../config.js';
 
 const MSG_SNAPSHOT = 1;
-const P_BYTES = 38, E_BYTES = 12, B_BYTES = 10, EB_BYTES = 8, K_BYTES = 7, T_BYTES = 9;
+const P_BYTES = 38, E_BYTES = 12, B_BYTES = 10, EB_BYTES = 8, K_BYTES = 7, T_BYTES = 9, POI_BYTES = 10;
 const MAX_EVENTS = 160;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -40,8 +41,8 @@ export function encodeSnapshot(sim, events, includeBuilds) {
   };
   if (includeBuilds) meta.b = sim.players.map(buildInfo);
   const metaBytes = enc.encode(JSON.stringify(meta));
-  const P = sim.players, E = sim.enemies, B = sim.bullets, EB = sim.ebullets, K = sim.pickups, T = sim.teles;
-  const size = 20 + P.length * P_BYTES + E.length * E_BYTES + B.length * B_BYTES + EB.length * EB_BYTES
+  const P = sim.players, E = sim.enemies, B = sim.bullets, EB = sim.ebullets, K = sim.pickups, T = sim.teles, O = sim.pois;
+  const size = 22 + O.length * POI_BYTES + P.length * P_BYTES + E.length * E_BYTES + B.length * B_BYTES + EB.length * EB_BYTES
     + K.length * K_BYTES + T.length * T_BYTES + metaBytes.length;
   const buf = new ArrayBuffer(size);
   const v = new DataView(buf);
@@ -55,6 +56,7 @@ export function encodeSnapshot(sim, events, includeBuilds) {
   v.setUint16(o, K.length); o += 2;
   v.setUint16(o, T.length); o += 2;
   v.setUint32(o, metaBytes.length); o += 4;
+  v.setUint16(o, O.length); o += 2;
 
   for (const p of P) {
     v.setUint8(o, p.pid);
@@ -70,18 +72,18 @@ export function encodeSnapshot(sim, events, includeBuilds) {
     v.setInt16(o + 30, Math.round(Math.atan2(p.aimY, p.aimX) * 10000));
     v.setUint8(o + 32, u8(p.reviveT));
     v.setUint32(o + 33, p.lastSeq >>> 0);
-    v.setUint8(o + 37, 0);
+    v.setUint8(o + 37, Math.min(255, Math.ceil(p.buffT / 12)));
     o += P_BYTES;
   }
   for (const e of E) {
     v.setUint16(o, e.id);
     v.setUint8(o + 2, ENEMY_INDEX[e.type]);
-    v.setUint8(o + 3, (e.elite ? 1 : 0));
+    v.setUint8(o + 3, (e.elite ? 1 : 0) | (e.guardian ? (e.v & 3) << 1 | 8 : 0));
     v.setInt16(o + 4, q(e.x)); v.setInt16(o + 6, q(e.y));
     v.setUint8(o + 8, u8(e.flash));
     v.setUint8(o + 9, u8((e.hp / e.maxHp) * 255));
-    v.setUint8(o + 10, ang8(e.boss && e.charging ? e.cang : e.ang));
-    v.setUint8(o + 11, e.boss ? (e.charging | 0) : e.state);
+    v.setUint8(o + 10, ang8((e.boss || e.guardian) && e.charging ? e.cang : e.ang));
+    v.setUint8(o + 11, e.boss ? (e.charging | 0) : e.guardian ? ((e.charging | 0) | (e.asleep ? 4 : 0)) : e.state);
     o += E_BYTES;
   }
   for (const b of B) {
@@ -114,6 +116,16 @@ export function encodeSnapshot(sim, events, includeBuilds) {
     v.setUint8(o + 8, u8(t.dur));
     o += T_BYTES;
   }
+  for (const q of O) {
+    v.setUint8(o, q.id);
+    v.setUint8(o + 1, POI_TYPES.indexOf(q.type));
+    v.setInt16(o + 2, q.x * 4); v.setInt16(o + 4, q.y * 4);
+    v.setUint8(o + 6, q.state);
+    v.setUint8(o + 7, Math.max(0, Math.min(255, q.prog)));
+    v.setUint8(o + 8, (q.tier ? 1 : 0) | (q.locked ? 2 : 0));
+    v.setUint8(o + 9, 0);
+    o += POI_BYTES;
+  }
   new Uint8Array(buf, o, metaBytes.length).set(metaBytes);
   return buf;
 }
@@ -133,7 +145,8 @@ export function decodeSnapshot(buf) {
   const nK = v.getUint16(o); o += 2;
   const nT = v.getUint16(o); o += 2;
   const metaLen = v.getUint32(o); o += 4;
-  const players = [], enemies = [], bullets = [], ebullets = [], pickups = [], teles = [];
+  const nO = v.getUint16(o); o += 2;
+  const players = [], enemies = [], bullets = [], ebullets = [], pickups = [], teles = [], pois = [];
   for (let i = 0; i < nP; i++) {
     const flags = v.getUint8(o + 1);
     const a = v.getInt16(o + 30) / 10000;
@@ -147,7 +160,7 @@ export function decodeSnapshot(buf) {
       iframes: v.getUint8(o + 25), hp: v.getFloat32(o + 26),
       aimX: Math.cos(a), aimY: Math.sin(a),
       reviveT: v.getUint8(o + 32), lastSeq: v.getUint32(o + 33),
-      r: PLAYER_RADIUS,
+      r: PLAYER_RADIUS, buffT: v.getUint8(o + 37) * 12,
     });
     o += P_BYTES;
   }
@@ -157,11 +170,13 @@ export function decodeSnapshot(buf) {
     const state = v.getUint8(o + 11);
     const ang = fromAng8(v.getUint8(o + 10));
     const boss = type === 'gozcu';
+    const guardian = !!(flags & 8);
     enemies.push({
-      id: v.getUint16(o), type, elite: !!(flags & 1), boss, r: ENEMIES[type].r * (flags & 1 ? 1.3 : 1),
+      id: v.getUint16(o), type, elite: !!(flags & 1), boss, guardian, v: (flags >> 1) & 3,
+      asleep: guardian && !!(state & 4), r: ENEMIES[type].r * (flags & 1 ? 1.3 : 1),
       x: v.getInt16(o + 4) / 4, y: v.getInt16(o + 6) / 4,
       flash: v.getUint8(o + 8), hp: v.getUint8(o + 9) / 255, maxHp: 1,
-      ang, cang: ang, state, charging: boss ? state : 0,
+      ang, cang: ang, state, charging: boss ? state : guardian ? state & 3 : 0,
     });
     o += E_BYTES;
   }
@@ -187,6 +202,15 @@ export function decodeSnapshot(buf) {
     teles.push({ id: v.getUint16(o), type: ENEMY_IDS[v.getUint8(o + 2)], x: v.getInt16(o + 3) / 4, y: v.getInt16(o + 5) / 4, t: v.getUint8(o + 7), dur: v.getUint8(o + 8) });
     o += T_BYTES;
   }
+  for (let i = 0; i < nO; i++) {
+    const type = POI_TYPES[v.getUint8(o + 1)];
+    const f = v.getUint8(o + 8);
+    pois.push({
+      id: v.getUint8(o), type, x: v.getInt16(o + 2) / 4, y: v.getInt16(o + 4) / 4,
+      state: v.getUint8(o + 6), prog: v.getUint8(o + 7), tier: f & 1, locked: !!(f & 2), r: POI_DEFS[type].r,
+    });
+    o += POI_BYTES;
+  }
   const meta = JSON.parse(dec.decode(new Uint8Array(buf, o, metaLen)));
-  return { tick, players, enemies, bullets, ebullets, pickups, teles, meta };
+  return { tick, players, enemies, bullets, ebullets, pickups, teles, pois, meta };
 }

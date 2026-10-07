@@ -6,6 +6,8 @@ import { ARENA_W, ARENA_H } from '../src/config.js';
 
 const runs = +(process.argv[2] || 10);
 const nPlayers = +(process.argv[3] || 1);
+// structures hand out free upgrades; emulate ~`bonus` of them per wave (default: a full map loot run ~0.7)
+const bonus = +(process.argv[4] ?? 0.7);
 
 function botInput(sim, p, t) {
   // repulsion from enemies and enemy bullets, weak pull to arena center
@@ -31,7 +33,7 @@ for (let r = 0; r < runs; r++) {
   for (let i = 0; i < nPlayers; i++) sim.addPlayer('b' + i, 'B' + i);
   const inputs = new Map();
   const waveTimes = {};
-  let t = 0;
+  let t = 0, lastBonusWave = -1;
   while (sim.phase !== 'gameover' && sim.phase !== 'victory' && t < 60 * 60 * 90) {
     for (const p of sim.players) {
       inputs.set(p.pid, botInput(sim, p, t));
@@ -42,6 +44,10 @@ for (let r = 0; r < runs; r++) {
       }
     }
     const w = sim.wave;
+    if (bonus && sim.phase === 'wave' && sim.wave !== lastBonusWave) {
+      lastBonusWave = sim.wave;
+      for (const p of sim.players) { let n = bonus; while (n > 0) { if (Math.random() < Math.min(1, n)) sim.grantLoot(p, 1); n -= 1; } }
+    }
     sim.step(inputs);
     sim.drainEvents();
     if (sim.wave !== w) waveTimes[sim.wave] = t;

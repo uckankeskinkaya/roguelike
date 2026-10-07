@@ -13,6 +13,7 @@ export const ENEMIES = {
   bolunen:  { name: 'Bölünen', hp: 42, speed: 80, r: 19, dmg: 12, xp: 2, ai: 'chase', split: 'yavru', color: '#ff6bd6', mass: 2 },
   yavru:    { name: 'Yavru', hp: 9, speed: 150, r: 10, dmg: 7, xp: 1, ai: 'chase', color: '#ffa3ea' },
   firildak: { name: 'Fırıldak', hp: 48, speed: 38, r: 18, dmg: 10, xp: 3, ai: 'turret', color: '#3ee6ff', mass: 3 },
+  muhafiz:  { name: 'Muhafız', hp: 1100, speed: 55, r: 40, dmg: 22, xp: 28, ai: 'guardian', color: '#ffb13d', mass: 1000, guardian: true },
   gozcu:    { name: 'Kor Gözcü', hp: 2400, speed: 62, r: 56, dmg: 25, xp: 40, ai: 'boss', color: '#ff3355', mass: 1000, boss: true },
 };
 
@@ -157,7 +158,37 @@ export const AI = {
   boss(sim, e, t, sp) {
     bossAI(sim, e, t, sp);
   },
+
+  // Map guardian: sleeps next to its treasure until a player gets close (or
+  // shoots it), then fights with a boss pattern kit; goes back to sleep and
+  // heals when everyone leaves.
+  guardian(sim, e, t, sp) {
+    const near = t ? Math.hypot(t.x - e.x, t.y - e.y) : 1e9;
+    if (e.asleep) {
+      const hx = e.hx - e.x, hy = e.hy - e.y, hd = Math.hypot(hx, hy);
+      if (hd > 8) { e.vx = (hx / hd) * 180; e.vy = (hy / hd) * 180; } else { e.vx = 0; e.vy = 0; }
+      if (near < 520) sim.wakeGuardian(e);
+      return;
+    }
+    if (near > 1300) {
+      if (++e.lose > 360) {
+        e.asleep = true; e.hp = e.maxHp; e.state = 0; e.pat = -1; e.lose = 0; e.enraged = false; e.charging = 0;
+        return;
+      }
+    } else e.lose = 0;
+    bossAI(sim, e, near < 1300 ? t : null, sp);
+    const hd = Math.hypot(e.x - e.hx, e.y - e.hy);
+    if (hd > 900) { e.vx = ((e.hx - e.x) / hd) * sp * 2; e.vy = ((e.hy - e.y) / hd) * sp * 2; }
+  },
 };
+
+// Pattern kits for the four guardian variants
+export const GUARDIAN_KITS = [
+  ['ring', 'charge', 'ring', 'aimed'],
+  ['spiral', 'aimed', 'spiral', 'summon'],
+  ['aimed', 'summon', 'ring', 'charge'],
+  ['spiral', 'ring', 'charge', 'summon'],
+];
 
 // ---------------------------------------------------------------------------
 // Boss: "Kor Gözcü" — a pattern state machine with an enraged second phase.
@@ -168,8 +199,10 @@ function bossAI(sim, e, t, sp) {
   if (enraged && !e.enraged) {
     e.enraged = true;
     e.pat = -1; e.pt = 0; e.state = 0; e.st = 50;
-    sim.emit('bossphase', e.x, e.y);
-    sim.emit('stop', 160);
+    if (e.boss) {
+      sim.emit('bossphase', e.x, e.y);
+      sim.emit('stop', 160);
+    } else sim.emit('ring', e.x, e.y, e.v);
     // clear some bullets to give the players a breather and a sense of impact
     for (const b of sim.ebullets) if (Math.hypot(b.x - e.x, b.y - e.y) < 260) b.dead = true;
   }
@@ -179,8 +212,9 @@ function bossAI(sim, e, t, sp) {
   if (e.state === 0) { // idle: drift toward target
     if (t) moveToward(e, t, sp * 0.8);
     if (--e.st <= 0) {
-      e.pat = (e.pat + 1) % BOSS_PATTERNS.length;
-      e.patName = BOSS_PATTERNS[e.pat];
+      const kit = e.kit || BOSS_PATTERNS;
+      e.pat = (e.pat + 1) % kit.length;
+      e.patName = kit[e.pat];
       e.state = 1; e.pt = 0;
       e.spin = sim.rng.range(0, TAU);
       e.dir = sim.rng.sign();

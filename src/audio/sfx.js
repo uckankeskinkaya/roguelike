@@ -230,6 +230,19 @@ const SOUNDS = {
   victory: [1000, (d, v) => {
     [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(d, { type: 'square', f0: f, t: i * 0.12, dur: 0.35, vol: 0.07 * v }));
   }],
+  poi: [200, (d, v) => {
+    tone(d, { type: 'sawtooth', f0: 110, f1: 330, dur: 0.5, vol: 0.12 * v, curve: 'lin', attack: 0.05 });
+    [330, 495, 660].forEach((f, i) => tone(d, { type: 'triangle', f0: f, t: 0.1 + i * 0.07, dur: 0.4, vol: 0.09 * v }));
+  }],
+  chest: [150, (d, v) => {
+    noise(d, { dur: 0.12, vol: 0.2 * v, type: 'bandpass', f0: 900, q: 2 });
+    [523, 659, 784, 1047, 1319].forEach((f, i) => tone(d, { type: 'square', f0: f, t: 0.05 + i * 0.06, dur: 0.28, vol: 0.06 * v }));
+    tone(d, { type: 'sine', f0: 1047, t: 0.35, dur: 0.6, vol: 0.12 * v });
+  }],
+  loot: [60, (d, v) => {
+    tone(d, { type: 'triangle', f0: 880, f1: 1320, dur: 0.12, vol: 0.12 * v });
+    tone(d, { type: 'sine', f0: 1760, t: 0.07, dur: 0.25, vol: 0.09 * v });
+  }],
   spawn: [90, (d, v) => tone(d, { type: 'sine', f0: 180, f1: 90, dur: 0.12, vol: 0.04 * v })],
 };
 

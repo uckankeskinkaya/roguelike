@@ -17,7 +17,7 @@ export function dashCooldownTicks(dashCdReduction) {
  * input: { mx, my, dash }
  * Returns 1 if a dash started, 2 if a dash ended, 0 otherwise.
  */
-export function stepMovement(m, input, speedMul, dashCdTicks) {
+export function stepMovement(m, input, speedMul, dashCdTicks, map = null) {
   let result = 0;
   if (m.dashCd > 0) m.dashCd--;
   let mx = input.mx || 0, my = input.my || 0;
@@ -58,5 +58,13 @@ export function stepMovement(m, input, speedMul, dashCdTicks) {
   if (m.x > ARENA_W - r) { m.x = ARENA_W - r; m.vx = 0; }
   if (m.y < r) { m.y = r; m.vy = 0; }
   if (m.y > ARENA_H - r) { m.y = ARENA_H - r; m.vy = 0; }
+  if (map) {
+    // slide along obstacles: remove the velocity component pointing into them
+    const n = map.collide(m, r);
+    if (n) {
+      const vn = m.vx * n.x + m.vy * n.y;
+      if (vn < 0) { m.vx -= vn * n.x; m.vy -= vn * n.y; }
+    }
+  }
   return result;
 }

@@ -39,13 +39,15 @@ src/
     weapons.js        9 silah tanımı (veri) + kademe ölçekleme
     skills.js         18 yetenek tanımı (veri) + istatistik hesaplama
     enemies.js        9 düşman + boss tanımı ve yapay zekâ davranışları
-    waves.js          Doğma tablosu, dalga süreleri, zorluk eğrileri
+    waves.js          Doğma tablosu, dalga kotaları, zorluk eğrileri
+    map.js            Tohumdan harita: engeller, bölgeler, yapılar, çarpışma ızgarası
   render/
     renderer.js       Kamera, zemin, ışık haritası, varlık çizimleri
     fx.js             Olay → parçacık/sarsıntı/flash/banner/ses
     particles.js      Havuzlu parçacık sistemi
     hud.js            Can/XP/dalga/boss barı/silahlar
     sprites.js        Kodla üretilen, önbelleğe alınan sprite'lar
+    mapart.js         Engeller, yapılar, Muhafız ve minimap çizimi
     icons.js          Silah ve yetenek ikonları (vektör)
   input/input.js      Klavye+fare, gamepad, dokunmatik; otomatik cihaz geçişi
   audio/sfx.js        WebAudio ses efektleri + prosedürel müzik
@@ -102,6 +104,16 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
   **Kor Gözcü** boss'u (spiral, halka, hücum, nişanlı yelpaze ve çağırma desenleri; %50 canın
   altında öfkeli ikinci evre). Ölüm = baştan. Her koşu bir **tohuma** bağlı. Aynı tohum aynı
   silah tekliflerini ve düşman dizilimini üretir (tek oyunculu).
+- **Harita:** 3600×2400'lük açık bir alan, tohumdan üretilir (host ve istemciler aynı haritayı
+  kendileri kurar, ağdan harita gitmez). Kayalar, sütunlar ve kristaller yolu keser ve düşman
+  mermilerini durdurur (siper). Köşede minimap var. Düşmanlar takımın etrafında, ekran dışında doğar.
+- **Yapılar** (üstünde durarak etkinleşir, düğme yok: klavye/gamepad/dokunmatikte aynı):
+  Sandık (anında 1 yükseltme), Altın Sandık (2 yükseltme, Muhafız'ın arkasında kilitli),
+  Şifa Pınarı (takımı iyileştirir, düşenleri kaldırır), Kan Sunağı (pusu, yenince herkese 2 yükseltme),
+  Enerji Kulesi (alanda şarj ol, XP yağmuru), Savaş Totemi (45 sn hasar/atış hızı).
+- **Haritada bosslar:** 3 uyuyan **Muhafız** (4 farklı saldırı seti). Yaklaşınca ya da vurulunca
+  uyanırlar, herkes uzaklaşırsa geri uyuyup iyileşirler. Öldürünce herkese 2 yükseltme, kalpler ve altın
+  sandığın kilidi. Dalga bitişini beklemezler: isteğe bağlıdırlar.
 - **Silahlar (9):** Kıvılcım, Saçma, İğne Yağmuru, Ray Topu (anlık delici ışın), Roketatar
   (alan hasarı), Ay Bıçağı (geri dönen), Şimşek (zincirleme), Ejder Nefesi (tutuşturan alev),
   Avcı Sürüsü (güdümlü). Her biri I–IV arası yükseltilebilir, en fazla 4 silah taşınır.
@@ -129,5 +141,7 @@ node tools/simtest.mjs 4          # headless: 4 bot ile tüm koşuyu simüle ede
 node tools/balance.mjs 10 1       # zorluk ölçümü: kaçan bot ile 10 koşu
 node tools/smoke.mjs out/         # tarayıcı smoke testi (Playwright, sunucu :8080'de açık olmalı)
 node tools/cooptest.mjs out/ 2    # host + 2 istemci gerçek WebRTC co-op testi
+node tools/maptest.mjs            # harita erişilebilirliği + yapı/Muhafız mantığı
+node tools/nettest.mjs            # snapshot kodlama + istemci tahmini
 node tools/make-icons.mjs         # icons/icon.svg'den PNG ikonları üretir
 ```

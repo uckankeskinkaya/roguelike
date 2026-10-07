@@ -6,6 +6,7 @@ import { ENEMIES } from '../sim/enemies.js';
 import { glow, withAlpha, floorTile } from './sprites.js';
 import { drawWeapon } from './icons.js';
 import { P } from './particles.js';
+import { drawZones, drawObstacles, drawPois, drawPoiBeacons, drawGuardian } from './mapart.js';
 import { dashCooldownTicks } from '../sim/player.js';
 import { REVIVE_TICKS } from '../config.js';
 
@@ -34,7 +35,7 @@ export class Renderer {
     this.stars = [];
     for (let i = 0; i < 160; i++) this.stars.push({ x: Math.random() * 2048, y: Math.random() * 2048, s: Math.random() * 1.6 + 0.3, p: Math.random() * 0.4 + 0.1 });
     this.dust = [];
-    for (let i = 0; i < 70; i++) this.dust.push({ x: Math.random() * ARENA_W, y: Math.random() * ARENA_H, vx: (Math.random() - 0.5) * 8, vy: -4 - Math.random() * 8, s: Math.random() * 1.5 + 0.5 });
+    for (let i = 0; i < 260; i++) this.dust.push({ x: Math.random() * ARENA_W, y: Math.random() * ARENA_H, vx: (Math.random() - 0.5) * 8, vy: -4 - Math.random() * 8, s: Math.random() * 1.5 + 0.5 });
     this.resize();
   }
 
@@ -127,6 +128,10 @@ export class Renderer {
       this.cam.x = hw * 2 > ARENA_W + m * 2 ? ARENA_W / 2 : Math.max(hw - m, Math.min(ARENA_W - hw + m, this.cam.x));
       this.cam.y = hh * 2 > ARENA_H + m * 2 ? ARENA_H / 2 : Math.max(hh - m, Math.min(ARENA_H - hh + m, this.cam.y));
     }
+    {
+      const zz = this.cam.zoom, mg = 120;
+      this.vis = { x0: this.cam.x - this.w / 2 / zz - mg, x1: this.cam.x + this.w / 2 / zz + mg, y0: this.cam.y - this.h / 2 / zz - mg, y1: this.cam.y + this.h / 2 / zz + mg };
+    }
     const tr = fx.trauma * fx.trauma;
     const T = this.time;
     this.shakeX = 26 * tr * (Math.sin(T * 61.3) + Math.sin(T * 23.7) * 0.5) + fx.kickX;
@@ -148,6 +153,8 @@ export class Renderer {
     ctx.translate(-this.cam.x + this.shakeX, -this.cam.y + this.shakeY);
 
     this.drawArena(view);
+    if (view.map) drawObstacles(ctx, view.map, this.vis, this.time);
+    drawPois(ctx, view, me, this.time, this.vis);
     for (const k of view.pickups) this.drawPickup(k, ipos(k));
     for (const t of view.teles) this.drawTele(t);
     this.drawShadows(view.enemies, ipos);
@@ -179,6 +186,7 @@ export class Renderer {
     ctx.rotate(this.shakeR);
     ctx.scale(z, z);
     ctx.translate(-this.cam.x + this.shakeX, -this.cam.y + this.shakeY);
+    drawPoiBeacons(ctx, view, this.time);
     this.drawEBullets(view, ipos);
     this.drawBeams();
     this.drawTexts();
@@ -227,6 +235,7 @@ export class Renderer {
     const vy1 = Math.min(ARENA_H, Math.ceil(this.cam.y + this.h / 2 / z + m));
     ctx.fillStyle = this.floorPattern;
     ctx.fillRect(vx0, vy0, vx1 - vx0, vy1 - vy0);
+    if (view.map) drawZones(ctx, view.map, { x0: vx0, x1: vx1, y0: vy0, y1: vy1 });
     const dx0 = vx0 >> 1, dy0 = vy0 >> 1, dw = (vx1 - vx0) >> 1, dh = (vy1 - vy0) >> 1;
     if (dw > 0 && dh > 0) {
       ctx.globalAlpha = 0.9;
@@ -248,6 +257,7 @@ export class Renderer {
     for (const d of this.dust) {
       d.x += d.vx * 0.016; d.y += d.vy * 0.016;
       if (d.y < 0) { d.y = ARENA_H; d.x = Math.random() * ARENA_W; }
+      if (d.x < this.vis.x0 || d.x > this.vis.x1 || d.y < this.vis.y0 || d.y > this.vis.y1) continue;
       ctx.fillRect(d.x, d.y, d.s, d.s);
     }
     // glowing border
@@ -461,6 +471,10 @@ export class Renderer {
         ctx.globalCompositeOperation = 'source-over';
         break;
       }
+      case 'muhafiz':
+        if (e.charging === 1 && !e.asleep) this.chargeLine(e.cang !== undefined ? e.cang : e.ang, 520, r, true, r * 1.4);
+        drawGuardian(ctx, e, t, flash, me, p);
+        break;
       case 'gozcu':
         this.drawBoss(e, view, me, p);
         break;
@@ -826,7 +840,9 @@ export class Renderer {
       put(pos.x, pos.y, p.downed ? 260 : 520, p.connected ? 1 : 0.4);
     }
     for (const l of fx.lights) put(l.x, l.y, l.r, Math.min(1, (l.life / l.max) * 1.5));
-    for (const e of view.enemies) if (e.boss) put(e.x, e.y, 320, 0.8);
+    for (const e of view.enemies) if (e.boss || (e.guardian && !e.asleep)) put(e.x, e.y, 320, 0.8);
+    for (const q of view.pois || []) put(q.x, q.y, q.state === 2 ? 90 : 190, q.state === 2 ? 0.4 : 0.75);
+    if (view.map) for (const b of view.map.obstacles) if (b.kind === 'crystal' && Math.abs(b.x - this.cam.x) < this.w / this.cam.zoom && Math.abs(b.y - this.cam.y) < this.h / this.cam.zoom) put(b.x, b.y, 130, 0.6);
     for (const b of view.bullets) if (b.kind === 'rocket' || b.kind === 'flame') put(b.x, b.y, 70, 0.4);
     L.globalAlpha = 1;
     const { ctx, dpr } = this;

@@ -2,6 +2,8 @@
 // everything, plus client-side prediction + reconciliation for the local player.
 import { TICK_MS, INTERP_TICKS } from '../config.js';
 import { stepMovement, dashCooldownTicks } from '../sim/player.js';
+import { genMap } from '../sim/map.js';
+import { hashSeed } from '../rng.js';
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const MOVE_KEYS = ['x', 'y', 'vx', 'vy', 'dashT', 'dashCd', 'dashDx', 'dashDy', 'downed'];
@@ -19,6 +21,7 @@ export class ClientWorld {
     this.seq = 0;
     this.errX = 0; this.errY = 0;
     this.lastSnapAt = 0;
+    this.map = null;         // built from the run seed on the first snapshot
   }
 
   latest() { return this.snaps[this.snaps.length - 1]; }
@@ -26,6 +29,7 @@ export class ClientWorld {
   onSnapshot(s, now) {
     const last = this.latest();
     if (last && s.tick <= last.tick) return [];
+    if (!this.map && s.meta.seed) this.map = genMap(hashSeed(s.meta.seed));
     if (s.meta.b) {
       this.builds.clear();
       for (const b of s.meta.b) this.builds.set(b.pid, b);
@@ -76,7 +80,7 @@ export class ClientWorld {
 
   applyInput(pred, input, build) {
     if (Math.hypot(input.ax, input.ay) > 0.2) { pred.aimX = input.ax; pred.aimY = input.ay; }
-    return stepMovement(pred, input, build.st.speed, dashCooldownTicks(build.st.dashCd));
+    return stepMovement(pred, input, build.st.speed, dashCooldownTicks(build.st.dashCd), this.map);
   }
 
   // One local fixed tick: predict and return the message to send.
@@ -143,7 +147,7 @@ export class ClientWorld {
       const lp = latest.players.find((q) => q.pid === p.pid) || p;
       const bi = this.builds.get(p.pid);
       const out = Object.assign({}, p, {
-        hp: lp.hp, downed: lp.downed, connected: lp.connected, reviveT: lp.reviveT, dashCd: lp.dashCd,
+        hp: lp.hp, buffT: lp.buffT, downed: lp.downed, connected: lp.connected, reviveT: lp.reviveT, dashCd: lp.dashCd,
         name: bi ? bi.name : `Oyuncu ${p.pid + 1}`,
         weapons: bi ? bi.w.map(([id, tier]) => ({ id, tier })) : [],
         skills: bi ? bi.sk : {},
@@ -166,6 +170,8 @@ export class ClientWorld {
       ebullets: interp(a.ebullets, b.ebullets),
       pickups: interp(a.pickups, b.pickups),
       teles: b.teles,
+      pois: latest.pois,
+      map: this.map,
     };
   }
 }
