@@ -109,7 +109,7 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
 - **Harita:** 6400×4200'lük açık bir alan, tohumdan üretilir (host ve istemciler aynı haritayı
   kendileri kurar, ağdan harita gitmez). Kayalar, sütunlar ve kristaller yolu keser ve düşman
   mermilerini durdurur (siper). **Keşif sisi:** yalnızca gezdiğin yerler haritada görünür (co-op'ta ortak).
-  Köşedeki minimap çevreni gösterir, **M / Tab / Select / 🗺** tüm haritayı açar. Düşmanlar takımın etrafında, ekran dışında doğar.
+  Köşedeki minimap çevreni gösterir, **M / Tab / LT / RT / Select / 🗺** tüm haritayı açar. Düşmanlar takımın etrafında, ekran dışında doğar.
 - **Yapılar** (üstünde durarak etkinleşir, düğme yok: klavye/gamepad/dokunmatikte aynı):
   Sandık (3 karttan seç), Altın Sandık (2 seçim, Muhafız'ın arkasında kilitli),
   Şifa Pınarı (takımı iyileştirir, düşenleri kaldırır), Kan Sunağı (pusu, yenince herkese 2 seçim),
@@ -132,7 +132,8 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
 |---|---|---|---|
 | Hareket | WASD / oklar | Sol analog | Ekranın sol yarısında sürükle |
 | Nişan | Fare | Sağ analog (bırakınca otomatik) | Sağ yarıda sürükle (yoksa otomatik) |
-| Atılma | Boşluk / Shift / sağ tık | A / RB / LB / tetikler | ATIL düğmesi |
+| Atılma | Boşluk / Shift / sağ tık | A / RB / LB | ATIL düğmesi |
+| Harita | M / Tab | LT / RT / Select / Y | 🗺 düğmesi |
 | Menü | Esc / P | Start | ❚❚ düğmesi |
 
 Silahlar otomatik ateş eder. Atılma sırasında dokunulmazsın.

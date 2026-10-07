@@ -130,9 +130,9 @@ export class Input {
 
     this.gpMove = [mx, my];
     this.gpAim = aim;
-    if (edge(0) || edge(4) || edge(5) || edge(6) || edge(7)) this.dashLatch = true;
+    if (edge(0) || edge(4) || edge(5)) this.dashLatch = true; // A / LB / RB
     if (edge(9)) this.onPause?.();
-    if (edge(8) || edge(3)) this.onMap?.();
+    if (edge(6) || edge(7) || edge(8) || edge(3)) this.onMap?.(); // LT / RT / Select / Y
 
     // menu navigation (d-pad / left stick with repeat)
     if (this.onNav) {
