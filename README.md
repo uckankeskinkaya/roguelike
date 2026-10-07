@@ -36,8 +36,8 @@ src/
   sim/
     world.js          Sim sınıfı: oyuncular, savaş, mermiler, toplama, dalga yöneticisi, olaylar
     player.js         Paylaşılan hareket/atılma fonksiyonu (istemci tahmini de bunu kullanır)
-    weapons.js        9 silah tanımı (veri) + kademe ölçekleme
-    skills.js         18 yetenek tanımı (veri) + istatistik hesaplama
+    weapons.js        21 silah tanımı (veri) + kademe ölçekleme
+    skills.js         40 yetenek tanımı (veri) + istatistik hesaplama
     enemies.js        9 düşman + boss tanımı ve yapay zekâ davranışları
     waves.js          Doğma tablosu, dalga kotaları, zorluk eğrileri
     map.js            Tohumdan harita: engeller, bölgeler, yapılar, çarpışma ızgarası
@@ -117,12 +117,20 @@ Her yayında `sw.js` içindeki `VERSION` değerini artır. Böylece kurulu istem
 - **Haritada bosslar:** 3 uyuyan **Muhafız** (4 farklı saldırı seti). Yaklaşınca ya da vurulunca
   uyanırlar, herkes uzaklaşırsa geri uyuyup iyileşirler. Öldürünce herkese 2 seçim, kalpler ve altın
   sandığın kilidi. Dalga bitişini beklemezler: isteğe bağlıdırlar.
-- **Silahlar (9):** Kıvılcım, Saçma, İğne Yağmuru, Ray Topu (anlık delici ışın), Roketatar
-  (alan hasarı), Ay Bıçağı (geri dönen), Şimşek (zincirleme), Ejder Nefesi (tutuşturan alev),
-  Avcı Sürüsü (güdümlü). Her biri I–IV arası yükseltilebilir, en fazla 4 silah taşınır.
-- **Yetenekler (18):** can, hız, hasar, atış hızı, çoklu mermi, delme, kritik, can emme, mıknatıs,
-  zırh, yenilenme, atılma bekleme süresi, atılma şok dalgası, yörünge bıçakları, patlayan
-  ölüler, sekme, yavaşlatma, menzil.
+- **Silahlar (21):** Kıvılcım, Saçma, İğne Yağmuru, Ray Topu, Roketatar, Ay Bıçağı, Şimşek,
+  Ejder Nefesi, Avcı Sürüsü + yeni: **Mızrak** (delen), **Zehir Oku** (zamanla hasar), **Buz Kıymığı**
+  (yavaşlatır), **Sekiş Topu**, **Ağır Top**, **Yıldırım** (rastgele hedefe), **Meteor Yağmuru**
+  (gecikmeli alan), **Mayın**, **Kor Halkası** (aura), **Yer Sarsıntısı** (şok dalgası), **Çift Kama**,
+  **Prizma** (üçlü ışın). Her biri I–IV arası yükseltilebilir, normalde 4 silah taşınır
+  (*Ek Silah Yuvası* ile 6'ya kadar).
+- **Yetenekler (40):** temel istatistikler (can, hız, hasar, atış hızı, kritik, zırh, yenilenme...) ve
+  davranış değiştirenler: kaçınma, diken yansıtma, infaz, kanama, parçalanma, hedef arayan mermiler,
+  dondurucu sis, ezici atılma, kan kudreti, ruh emici, İkinci Şans (ölümcül darbede ayağa kalk) ve daha fazlası.
+- **Co-op eşitliği:** XP ve seviye takımın ortak değeri. Seviye atlayınca, sandık/sunak açılınca ve
+  Muhafız yenilince **herkese aynı anda, aynı sayıda** seçim hakkı gelir; oyun herkes seçene kadar durur.
+  Geç katılan ya da bağlantısı kopan oyuncu kaçırdığı seviyelerin seçimlerini geri alır.
+  **Zorluk takım boyutuna göre ölçeklenir:** düşman sayısı ve XP ihtiyacı `1 + 0.4·(n−1)`, düşman canı
+  `1 + 0.55·(n−1)` kadar artar.
 - **Düşmanlar:** Sürüngen, Sinek (sürü), Tükürgen (menzilli), Kaya (hücumcu), Bombacı,
   Ok (çizgi atılması), Bölünen + Yavru, Fırıldak (halka mermi), elit varyantlar ve boss.
 
@@ -145,6 +153,7 @@ node tools/simtest.mjs 4          # headless: 4 bot ile tüm koşuyu simüle ede
 node tools/balance.mjs 10 1       # zorluk ölçümü: kaçan bot ile 10 koşu
 node tools/smoke.mjs out/         # tarayıcı smoke testi (Playwright, sunucu :8080'de açık olmalı)
 node tools/cooptest.mjs out/ 2    # host + 2 istemci gerçek WebRTC co-op testi
+node tools/weapontest.mjs         # tüm silah ve yetenekleri dener + co-op seçim eşitliği
 node tools/maptest.mjs            # harita erişilebilirliği + yapı/Muhafız mantığı
 node tools/nettest.mjs            # snapshot kodlama + istemci tahmini
 node tools/make-icons.mjs         # icons/icon.svg'den PNG ikonları üretir
